@@ -1,0 +1,32 @@
+# Dataset generation configuration
+# Pass this file to generate_dataset_from_yaml() in DatasetGeneration.py
+
+# --- Output ---
+dataset_name: dataset_POINTWISE          # null = auto-generated timestamp name
+output_dir: dataset
+
+# --- Simulation ---
+n_simulations: 2000
+seed: 42                    # null = non-reproducible
+steps_range: [50, 200]      # [min, max] steps per simulation (sampled uniformly)
+n_workers: -1                # parallel workers: 1 = sequential, -1 = all CPUs
+timestamps_per_groundtruth: 1 # number of timestamps to save per simulation
+
+# --- Oil spill physics ---
+sim_params:
+  N_PARTICLES: 2000
+  MAX_PARTICLES_PER_PIXEL: 50
+  MAX_FUEL: 50000           # max total active particles (initial + emitted)
+  SPILL_CENTER: null        # null = random water cell from source_mask
+  SPILL_RADIUS: 3.0
+  EMISSION_RATE: 20
+  EMISSION_SPREAD: 0.5
+  DT: 1.0
+  W_RANDOM: 1.2
+  W_WIND: 0.2
+  W_TIDE: 0.2
+  V_RANDOM_SCALE: 1.0
+  WIND_SPEED: 1.0
+  TIDE_SPEED: 1.0
+  GAUSSIAN_FILTER_SIZE: 1.5
+  WIND_ANGLE : null                # wind direction in degrees (0 = right, 90 = up)

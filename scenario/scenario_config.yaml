@@ -1,0 +1,14 @@
+# Scenario configuration
+# Used by ObservationScenario and ExtendedScenario in scenario.py / extended_scenario.py
+
+# --- Dataset ---
+dataset_path: dataset/dataset_POINTWISE/data_maps.npz
+
+# --- Agent ---
+initial_position: [50, 50]   # [row, col] — fixed start for all episodes
+
+# --- Sensor ---
+noise_std: 0.01              # Gaussian noise added to ground truth readings
+
+# --- Extended scenario ---
+budget: 300                  # maximum total Euclidean distance per episode (pixels)
