@@ -1,0 +1,57 @@
+# Dataset generation configuration
+# Pass this file to generate_dataset_from_yaml() in DatasetGeneration.py
+
+# --- Output ---
+dataset_name: dataset_POINTWISE          # null = auto-generated timestamp name
+output_dir: Datasets
+
+# --- Simulation ---
+n_simulations: 2000
+seed: 42                    # null = non-reproducible
+steps_range: [50, 100]      # [min, max] steps per simulation (sampled uniformly)
+n_workers: -1                # parallel workers: 1 = sequential, -1 = all CPUs
+timestamps_per_groundtruth: 1 # number of timestamps to save per simulation
+
+# --- Oil spill physics ---
+sim_params:
+  N_PARTICLES: 2000
+  MAX_PARTICLES_PER_PIXEL: 50
+  MAX_FUEL: 50000           # max total active particles (initial + emitted)
+  SPILL_CENTER: null        # null = random water cell from source_mask
+  SPILL_RADIUS: 3.0
+  EMISSION_RATE: 20
+  EMISSION_SPREAD: 0.5
+  DT: 1.0
+  W_RANDOM: 1.5
+  W_WIND: 0.5
+  W_TIDE: 0.5
+  V_RANDOM_SCALE: 1.0
+  WIND_SPEED: 1.0
+  TIDE_SPEED: 1.0
+  GAUSSIAN_FILTER_SIZE: 1.5
+  WIND_ANGLE : 45.0                # wind direction in degrees (0 = right, 90 = up)
+
+# --- Observation model ---
+observation_model_type: pointwise   # pointwise | nadir | conic
+observation_length: [5, 20]          # controls number_of_waypoints in path_generator_config
+
+
+# --- Path generator config (PathGeneratorConfig) ---
+# number_of_waypoints is set from observation_length above.
+path_generator_config:
+  noise_std: 0.1
+  max_distance_between_samples: 1.0
+  max_distance_between_wp: 40.0
+  min_distance_between_wp: 20.0
+
+# --- Observation config (ObservationConfig) ---
+# seed is set from the top-level seed above.
+# base_map and path_generator are set at runtime.
+observation_config:
+  noise_std: 0.01
+  nadir_camera_radius: 1        # only used by nadir model
+  nadir_average: false          # only used by nadir model
+  fov_angle: 60.0               # only used by conic model (degrees)
+  fov_radius: 10                # only used by conic model (pixels)
+  fov_min_noise_std: 0.01       # only used by conic model
+  fov_max_noise_std: 0.08       # only used by conic model

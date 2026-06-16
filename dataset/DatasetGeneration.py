@@ -300,7 +300,7 @@ if __name__ == "__main__":
         "--dataset",
         type=str,
         help="Name of the dataset to generate.",
-        default="Datasets/dataset_config_NADIR.yaml",
+        default="dataset_config_POINTWISE.yaml",
     )
     args = argparser.parse_args()
 

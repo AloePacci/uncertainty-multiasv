@@ -36,10 +36,10 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
-from gaussian_process_model import GaussianProcessModel
-from MC_dropout_model import MCDropoutModel
-from MC_ensemble_model import EnsembleModel
-from EDL_model import EDLModel
+from scenario.models.gaussian_process_model import GaussianProcessModel
+from scenario.models.MC_dropout_model import MCDropoutModel
+from scenario.models.MC_ensemble_model import EnsembleModel
+from scenario.models.EDL_model import EDLModel
 
 
 # ---------------------------------------------------------------------------
