@@ -207,7 +207,7 @@ class GaussianProcessModel:
 
 
     # ------------------------------------------------------------------
-    def predict(self, obs: dict) -> dict:
+    def predict(self, obs) -> dict:
         """
         Fit and predict for each sample in a batch.
 
@@ -224,14 +224,19 @@ class GaussianProcessModel:
             'predicted_std_epistemic'  : np.ndarray  (B, 1, H, W)
             'predicted_std_aleatoric'  : np.ndarray  (B, 1, H, W)
         """
-        obs_map  = np.asarray(obs["obs_map"],  dtype=np.float32)
-        obs_mask = np.asarray(obs["obs_mask"], dtype=np.float32)
-        if obs_map.ndim == 2:
-            obs_map  = obs_map[np.newaxis]
-            obs_mask = obs_mask[np.newaxis]
-        # Build (B, 2, H, W): channel 0 = mask, channel 1 = values
-        X = np.stack([obs_mask, obs_map], axis=1)
+        if isinstance(obs, dict):
 
+            obs_map  = np.asarray(obs["obs_map"],  dtype=np.float32)
+            obs_mask = np.asarray(obs["obs_mask"], dtype=np.float32)
+            if obs_map.ndim == 2:
+                obs_map  = obs_map[np.newaxis]
+                obs_mask = obs_mask[np.newaxis]
+            # Build (B, 2, H, W): channel 0 = mask, channel 1 = values
+            X = np.stack([obs_mask, obs_map], axis=1)
+        else:
+            X = np.asarray(obs, dtype=np.float32)
+            if X.ndim != 4 or X.shape[1] != 2:
+                raise ValueError(f"Expected input shape (B, 2, H, W), got {X.shape}")
         B, C, H, W = X.shape
         means   = np.zeros((B, 1, H, W), dtype=np.float32)
         epi_std = np.zeros((B, 1, H, W), dtype=np.float32)

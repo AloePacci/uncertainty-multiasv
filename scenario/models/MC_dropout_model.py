@@ -34,8 +34,9 @@ import torch.nn as nn
 from pathlib import Path
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
-
-from models import UNet
+import sys
+sys.path.append(str(Path(__file__)))  # allow imports from scenario/
+from unet_model import UNet
 
 
 # ---------------------------------------------------------------------------

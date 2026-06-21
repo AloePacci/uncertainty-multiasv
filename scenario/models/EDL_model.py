@@ -48,7 +48,7 @@ from pathlib import Path
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
-from models import UNet
+from unet_model import UNet
 
 
 # ---------------------------------------------------------------------------

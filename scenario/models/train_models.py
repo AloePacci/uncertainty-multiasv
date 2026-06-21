@@ -35,18 +35,20 @@ from pathlib import Path
 import numpy as np
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
-
-from scenario.models.gaussian_process_model import GaussianProcessModel
-from scenario.models.MC_dropout_model import MCDropoutModel
-from scenario.models.MC_ensemble_model import EnsembleModel
-from scenario.models.EDL_model import EDLModel
+import sys
+sys.path.append(str(Path(__file__)))  # allow imports from scenario/
+from gaussian_process_model import GaussianProcessModel
+from MC_dropout_model import MCDropoutModel
+from MC_ensemble_model import EnsembleModel
+from EDL_model import EDLModel
+from myopic_model import MyopicModel
 
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 
-DATASETS_DIR = Path("Datasets")
+DATASETS_DIR = Path("dataset")
 RESULTS_DIR  = Path("Results")
 WEIGHTS_DIR  = Path("Weights")
 
