@@ -1,0 +1,1 @@
+uv publish --publish-url https://gitlab.ratatosk.cc/api/v4/projects/syanes%2Fonlineplanning/packages/pypi --username syanes --password $GITLAB_PERSONAL_TOKEN
