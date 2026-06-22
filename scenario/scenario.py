@@ -87,7 +87,7 @@ class ObservationScenario:
         self.maps: np.ndarray = data[key]          # (N, H, W) float32
 
         self.H, self.W = self.maps.shape[1], self.maps.shape[2]
-        self.initial_position: tuple[int, int] = tuple(cfg["initial_position"])
+        self.initial_position: tuple[tuple[int, int], ...] = tuple(cfg["initial_position"])
         self.noise_std: float = float(cfg.get("noise_std", 0.0))
 
         self._rng = np.random.default_rng()
@@ -96,12 +96,14 @@ class ObservationScenario:
         self.ground_truth: np.ndarray | None = None
         self.obs_map:  np.ndarray | None = None
         self.obs_mask: np.ndarray | None = None
-        self.position: tuple[int, int] | None = None
-        self.trajectory: list[tuple[int, int]] = []
+        self.position: tuple[tuple[int, int], ...] | None = None
+        self.trajectory: tuple[tuple[int, ...], ...] = ()
         self._map_idx: int | None = None
 
         # Matplotlib figure (created lazily by render)
         self._fig = None
+        self._traj_line = []
+        self._traj_dot = []
 
     # ------------------------------------------------------------------
     def reset(self, map_idx: int | None = None) -> np.ndarray:
@@ -129,19 +131,19 @@ class ObservationScenario:
         self.trajectory = [self.initial_position]
 
         # Observe the starting cell
-        self._observe([self.initial_position])
+        self._observe(self.initial_position)
 
         return self.ground_truth
 
     # ------------------------------------------------------------------
-    def step(self, action: tuple[int, int]) -> tuple[np.ndarray, np.ndarray]:
+    def step(self, action: tuple[int, int] | tuple[tuple[int, int], ...]) -> tuple[np.ndarray, np.ndarray]:
         """
         Move the agent in a straight line to *action* and record observations.
 
         Parameters
         ----------
-        action : (row, col)
-            Target cell.  Clipped to map bounds if out of range.
+        action : (row, col) or [(row, col), ...]
+            Target cell(s).  Clipped to map bounds if out of range.
 
         Returns
         -------
@@ -150,18 +152,20 @@ class ObservationScenario:
         """
         if self.ground_truth is None:
             raise RuntimeError("Call reset() before step().")
+        
+        for index, act in enumerate(action):
 
-        r1 = int(np.clip(action[0], 0, self.H - 1))
-        c1 = int(np.clip(action[1], 0, self.W - 1))
+            r1 = int(np.clip(act[0], 0, self.H - 1))
+            c1 = int(np.clip(act[1], 0, self.W - 1))
 
-        r0, c0 = self.position
-        new_cells = _line_pixels(r0, c0, r1, c1)
+            r0, c0 = self.position[index]
+            new_cells = _line_pixels(r0, c0, r1, c1)
 
-        self._observe(new_cells)
-        self.trajectory.extend(new_cells)
-        self.position = (r1, c1)
+            self._observe(new_cells)
+            self.trajectory[index].extend(new_cells)
+            self.position[index] = (r1, c1)
 
-        return self.obs_map.copy(), self.obs_mask.copy()
+            return self.obs_map.copy(), self.obs_mask.copy()
 
     # ------------------------------------------------------------------
     def _observe(self, cells: list[tuple[int, int]]) -> None:
@@ -201,18 +205,23 @@ class ObservationScenario:
             axes[1].set_title("Observation Map")
             axes[2].set_title("Observation Mask")
             axes[3].set_title("Trajectory")
+            
             for ax in axes:
                 ax.axis("off")
+            
+            self._traj_line = []*len(self.position)
+            self._traj_dot = []*len(self.position)
 
-            traj = np.array(self.trajectory)
-            self._traj_line, = axes[3].plot(
-                traj[:, 1], traj[:, 0],
-                color="cyan", linewidth=1.5, alpha=0.8,
-            )
-            self._traj_dot, = axes[3].plot(
-                [self.position[1]], [self.position[0]],
-                "o", color="lime", markersize=6,
-            )
+            for index, traj in enumerate(self.trajectory):
+                traj = np.array(traj)
+                self._traj_line[index], = axes[3].plot(
+                    traj[:, 1], traj[:, 0],
+                    color="cyan", linewidth=1.5, alpha=0.8,
+                )
+                self._traj_dot[index], = axes[3].plot(
+                    [traj[-1, 1]], [traj[-1, 0]],
+                    "o", color="lime", markersize=6,
+                )
 
             self._fig.colorbar(self._im_gt,   ax=axes[0], fraction=0.046)
             self._fig.colorbar(self._im_obs,  ax=axes[1], fraction=0.046)
@@ -227,12 +236,14 @@ class ObservationScenario:
             self._im_obs.set_data(self.obs_map)
             self._im_mask.set_data(self.obs_mask)
             self._im_traj.set_data(self.ground_truth)
+            
+            for index, traj in enumerate(self.trajectory):
 
-            traj = np.array(self.trajectory)
-            self._traj_line.set_xdata(traj[:, 1])
-            self._traj_line.set_ydata(traj[:, 0])
-            self._traj_dot.set_xdata([self.position[1]])
-            self._traj_dot.set_ydata([self.position[0]])
+                traj = np.array(traj)
+                self._traj_line[index].set_xdata(traj[:, 1])
+                self._traj_line[index].set_ydata(traj[:, 0])
+                self._traj_dot[index].set_xdata([self.position[index][1]])
+                self._traj_dot[index].set_ydata([self.position[index][0]])
 
             self._fig.canvas.draw()
             self._fig.canvas.flush_events()

@@ -111,11 +111,6 @@ def build_models(epochs: int, batch_size: int, lr: float):
     """
     models = [
         (
-            "GP",
-            GaussianProcessModel(**GP_KWARGS),
-            {},
-        ),
-        (
             "MC_Dropout",
             MCDropoutModel(**NET_KWARGS, dropout_p=0.2, n_samples=30),
             dict(epochs=epochs, batch_size=batch_size, lr=lr),
@@ -132,6 +127,11 @@ def build_models(epochs: int, batch_size: int, lr: float):
             # max_grad_norm=1.0 evita explosión de gradientes en épocas iniciales.
             dict(epochs=epochs, batch_size=batch_size,
                  lr=min(lr, 5e-4), lam=1e-3, max_grad_norm=1.0),
+        ),
+        (
+            "GP",
+            GaussianProcessModel(**GP_KWARGS),
+            {},
         ),
     ]
     return models

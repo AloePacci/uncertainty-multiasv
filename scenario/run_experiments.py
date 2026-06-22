@@ -34,6 +34,8 @@ from pathlib import Path
 
 import numpy as np
 import matplotlib
+
+from scenario.models.train_models import weights_path
 matplotlib.use("Agg")          # headless-safe default; overridden below if rendering
 import matplotlib.pyplot as plt
 
@@ -54,6 +56,8 @@ from policies import (
 from models.gaussian_process_model import GaussianProcessModel
 from models.MC_ensemble_model import EnsembleModel
 from models.myopic_model import MyopicModel
+from models.EDL_model import EDLModel
+from models.MC_dropout_model import MCDropoutModel
 
 
 # ── Policy catalogue ──────────────────────────────────────────────────────────
@@ -106,6 +110,16 @@ def _make_ensemble(weights_path: Path) -> EnsembleModel:
     model.load_weights(weights_path)
     return model
 
+def _make_edl(weights_path: Path) -> EDLModel:
+    model = EDLModel(in_channels=2, base_channels=16, depth=3)
+    model.load_weights(weights_path)
+    return model
+
+def _make_mcdropout(weights_path: Path) -> MCDropoutModel:
+    model = MCDropoutModel(in_channels=2, base_channels=16, depth=3, dropout_p=0.2, n_samples=30)
+    model.load_weights(weights_path)
+    return model
+
 def _make_myopic() -> MyopicModel:
     return MyopicModel(power=2, k_neighbors=10)
 
@@ -138,6 +152,8 @@ def parse_args() -> argparse.Namespace:
                    help="Comma-separated subset of models to run")
     p.add_argument("--render", action="store_true",
                    help="Disable matplotlib rendering")
+    p.add_argument("--nagents", type=int, default=4,
+                   help="Number of agents in the environment (default: 4)")
     return p.parse_args()
 
 
@@ -273,6 +289,14 @@ def main() -> None:
     if "myopic" in model_names_req:
         print("Loading MyopicModel …")
         model_instances["myopic"] = _make_myopic()
+
+    if "edl" in model_names_req:
+        print("Loading EDLModel …")
+        model_instances["edl"] = _make_edl(args.weights)
+
+    if "mcdropout" in model_names_req:
+        print("Loading MCDropoutModel …")
+        model_instances["mcdropout"] = _make_mcdropout(args.weights)
 
     # ── Setup ──────────────────────────────────────────────────────────────
     cfg = ROOT / "scenario_config.yaml"

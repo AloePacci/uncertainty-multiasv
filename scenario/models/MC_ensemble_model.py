@@ -238,7 +238,7 @@ class EnsembleModel:
         }
 
     # ------------------------------------------------------------------
-    def predict(self, obs: dict) -> dict:
+    def predict(self, obs) -> dict:
         """
         Run inference with all ensemble members in eval() mode.
 
@@ -255,14 +255,21 @@ class EnsembleModel:
             'predicted_std_epistemic'  : np.ndarray  (B, 1, H, W)
             'predicted_std_aleatoric'  : np.ndarray  (B, 1, H, W)
         """
-        obs_map  = np.asarray(obs["obs_map"],  dtype=np.float32)
-        obs_mask = np.asarray(obs["obs_mask"], dtype=np.float32)
-        if obs_map.ndim == 2:
-            obs_map  = obs_map[np.newaxis]
-            obs_mask = obs_mask[np.newaxis]
-        # Build (B, 2, H, W): channel 0 = mask, channel 1 = values
-        X = np.stack([obs_mask, obs_map], axis=1)
-        X_t = torch.tensor(X, dtype=torch.float32).to(self.device)
+        if type(obs) is dict:
+            obs_map  = np.asarray(obs["obs_map"],  dtype=np.float32)
+            obs_mask = np.asarray(obs["obs_mask"], dtype=np.float32)
+            if obs_map.ndim == 2:
+                obs_map  = obs_map[np.newaxis]
+                obs_mask = obs_mask[np.newaxis]
+            # Build (B, 2, H, W): channel 0 = mask, channel 1 = values
+            X = np.stack([obs_mask, obs_map], axis=1)
+            X_t = torch.tensor(X, dtype=torch.float32).to(self.device)
+        else:
+            try:
+                X_t = obs.detach().float()
+            except AttributeError:
+                X_t = torch.tensor(np.asarray(obs), dtype=torch.float32)
+            X_t = X_t.to(self.device)
 
         self.eval_mode()
 
