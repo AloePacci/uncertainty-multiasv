@@ -260,7 +260,7 @@ def main() -> None:
     )
     model_names_req = (
         [m.strip() for m in args.models.split(",")]
-        if args.models else ["gaussian_process", "ensemble"]
+        if args.models else ["ensemble"] #["gaussian_process", "ensemble"]
     )
 
     unknown_p = set(policy_names) - set(all_policy_names)

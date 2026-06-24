@@ -215,7 +215,7 @@ class ExtendedScenario(ObservationScenario):
 
             
             for index, traj in enumerate(self.trajectory):
-                print(f"Trajectory {index}: {traj} on trajline {self._traj_line} and trajdot {self._traj_dot}")
+                # print(f"Trajectory {index}: {traj} on trajline {self._traj_line} and trajdot {self._traj_dot}")
                 traj = np.array(traj)
                 self._traj_line[index], = axes[3].plot(
                     traj[:, 1], traj[:, 0],
@@ -311,8 +311,8 @@ if __name__ == "__main__":
     while not done:
         wp = [(np.random.randint(0, env.H), np.random.randint(0, env.W)) for _ in range(len(env.position))] 
         obs, done, info = env.step(wp)
-        print(f"  dist {info['distance']}/{info['budget']:.0f} px  "
-              f"→ {wp}  |  MSE(unobs)={info['mse']:.4f}  |  done={done}")
+        # print(f"  dist {info['distance']}/{info['budget']:.0f} px  "
+        #       f"→ {wp}  |  MSE(unobs)={info['mse']:.4f}  |  done={done}")
         env.render()
         plt.pause(0.3)
 

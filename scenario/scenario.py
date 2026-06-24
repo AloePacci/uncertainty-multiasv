@@ -129,7 +129,7 @@ class ObservationScenario:
         self.obs_mask = np.zeros((self.H, self.W), dtype=np.float32)
         self.position = self.initial_position
         self.trajectory = [[position] for position in self.initial_position]
-        print(self.trajectory)
+        # print(self.trajectory)
 
         # Observe the starting cell
         self._observe(self.initial_position)
@@ -162,7 +162,7 @@ class ObservationScenario:
             r0, c0 = self.position[index]
             new_cells = _line_pixels(r0, c0, r1, c1)
 
-            print(f"Moving agent {index} from {(r0, c0)} to {(r1, c1)} through {len(new_cells)} new cells. accessing {self.trajectory}")
+            # print(f"Moving agent {index} from {(r0, c0)} to {(r1, c1)} through {len(new_cells)} new cells. accessing {self.trajectory}")
             self._observe(new_cells)
             self.trajectory[index].extend(new_cells)
             self.position[index] = (r1, c1)
@@ -215,7 +215,7 @@ class ObservationScenario:
             self._traj_dot = [[]]*len(self.trajectory)
 
             for index, traj in enumerate(self.trajectory):
-                print(f"Trajectory {index}: {traj} on trajline {self._traj_line} and trajdot {self._traj_dot}")
+                # print(f"Trajectory {index}: {traj} on trajline {self._traj_line} and trajdot {self._traj_dot}")
                 traj = np.array(traj)
                 self._traj_line[index], = axes[3].plot(
                     traj[:, 1], traj[:, 0],
@@ -269,10 +269,10 @@ if __name__ == "__main__":
         [(np.random.randint(0, env.H), np.random.randint(0, env.W)) for _ in range(len(env.position))] for _ in range(30)
     ]
     for wp in waypoints:
-        print(f"Moving to {wp}...")
+        # print(f"Moving to {wp}...")
         obs_map, obs_mask = env.step(wp)
         coverage = obs_mask.mean() * 100
-        print(f"  → moved to {wp}  |  coverage {coverage:.1f}%")
+        # print(f"  → moved to {wp}  |  coverage {coverage:.1f}%")
         env.render()
         plt.pause(0.4)
 

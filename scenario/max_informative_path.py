@@ -39,7 +39,7 @@ import numpy as np
 import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent))  # allow imports from scenario/
-from problem import Problem
+from policies.algorithms.problem import Problem
 
 # ────────────────────────────────────────────────────────────────────────── #
 # Constantes del dominio                                                     #

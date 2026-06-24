@@ -87,6 +87,7 @@ class MCTSPolicy(Policy):
         gamma: float = 1.0,
         exploration_c: float = math.sqrt(2),
         uncertainty_change_threshold: float = 1e-4,
+        nagents: int = 3,
     ) -> None:
         self._budget = float(budget)
         self._n_simulations = int(n_simulations)
@@ -99,6 +100,7 @@ class MCTSPolicy(Policy):
         self._gamma = float(gamma)
         self._exploration_c = float(exploration_c)
         self._uncertainty_change_threshold = float(uncertainty_change_threshold)
+        self._nagents = int(nagents)
 
         # Episode state
         self._remaining_budget: float = self._budget
@@ -119,7 +121,7 @@ class MCTSPolicy(Policy):
     def act(
         self,
         obs: dict,
-        position: tuple[int, int],
+        position: tuple[tuple[int, int], ...],
     ) -> tuple[int, int]:
         """
         Select the next waypoint using MCTS.
@@ -128,7 +130,7 @@ class MCTSPolicy(Policy):
         ----------
         obs      : dict — must contain ``predicted_uncertainty`` (H, W) and
                    ``obs_mask`` (H, W).
-        position : (row, col) — current agent position.
+        position : ((row, col), ...) — current agent positions.
 
         Returns
         -------
@@ -153,20 +155,15 @@ class MCTSPolicy(Policy):
         if info_max > info_min:
             info_map = (info_map - info_min) / (info_max - info_min)
 
-
-        # (row, col) → scenario (x, y) = (col, row).
-        row, col = int(position[0]), int(position[1])
-        scenario_pos: tuple[int, int] = (col, row)
-
         # Rebuild planner when the uncertainty map changed significantly.
         if self._uncertainty_changed(uncertainty):
-            self._build_planner(info_map, scenario_pos)
+            self._build_planner(info_map, position)
             self._last_uncertainty = uncertainty.copy()
 
         # Current MCTS state derived from the real environment.
         visited = _mask_to_visited(mask)
         state: dict = {
-            "position": scenario_pos,
+            "position": position,
             "budget": self._remaining_budget,
             "visited": visited,
         }
@@ -204,7 +201,7 @@ class MCTSPolicy(Policy):
     def _build_planner(
         self,
         info_map: np.ndarray,
-        initial_position: tuple[int, int],
+        initial_position: tuple[tuple[int, int], ...],
     ) -> None:
         """Construct a fresh problem and MCTS planner for the current info map."""
         problem = MaxInformativePathWaypoints(
