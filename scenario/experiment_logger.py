@@ -100,7 +100,7 @@ class ExperimentLogger:
         info: dict,
         obs: dict,
         ground_truth: np.ndarray,
-        position: tuple[int, int],
+        position: tuple[tuple[int, int], ...],
         policy_name: str,
         map_idx: int,
         dataset_name: str,
@@ -119,7 +119,7 @@ class ExperimentLogger:
                        ``predicted_mean``).
         ground_truth : (H, W) ground-truth map for the current episode
                        (available as ``env.ground_truth`` after reset).
-        position     : (row, col) agent position *after* the step.
+        position     : ((row, col), ...) agent positions *after* the step.
         policy_name  : free-form label identifying the policy.
         map_idx      : ground-truth map index used for this episode.
         dataset_name : identifier of the dataset (e.g. file stem or config key).
@@ -137,7 +137,7 @@ class ExperimentLogger:
         self._records.append({
             "experiment_id":    self.experiment_id,
             "step":             int(step),
-            "distance":         float(info["distance"]),
+            "distance":         info["distance"],
             "budget":           float(info["budget"]),
             "policy":           policy_name,
             "rmse":             rmse,

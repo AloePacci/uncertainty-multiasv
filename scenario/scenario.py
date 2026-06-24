@@ -41,12 +41,12 @@ def _line_pixels(r0: int, c0: int, r1: int, c1: int) -> list[tuple[int, int]]:
     cols = np.round(np.linspace(c0, c1, n_steps + 1)).astype(int)
 
     # Deduplicate while preserving order, skip first point (already observed)
-    seen: set[tuple[int, int]] = set()
-    pixels: list[tuple[int, int]] = []
+    seen: set[list[int, int]] = set()
+    pixels: list[list[int, int]] = []
     for r, c in zip(rows[1:], cols[1:]):
         if (r, c) not in seen:
             seen.add((r, c))
-            pixels.append((r, c))
+            pixels.append([r, c])
     return pixels
 
 
@@ -87,7 +87,7 @@ class ObservationScenario:
         self.maps: np.ndarray = data[key]          # (N, H, W) float32
 
         self.H, self.W = self.maps.shape[1], self.maps.shape[2]
-        self.initial_position: tuple[tuple[int, int], ...] = tuple(cfg["initial_position"])
+        self.initial_position: tuple[tuple[int, int], ...] = cfg["initial_position"]
         self.noise_std: float = float(cfg.get("noise_std", 0.0))
 
         self._rng = np.random.default_rng()
@@ -96,8 +96,8 @@ class ObservationScenario:
         self.ground_truth: np.ndarray | None = None
         self.obs_map:  np.ndarray | None = None
         self.obs_mask: np.ndarray | None = None
-        self.position: tuple[tuple[int, int], ...] | None = None
-        self.trajectory: tuple[tuple[int, ...], ...] = ()
+        self.position: list[list[int, int]] | None = None
+        self.trajectory: list[list[int]] = []
         self._map_idx: int | None = None
 
         # Matplotlib figure (created lazily by render)
@@ -128,7 +128,8 @@ class ObservationScenario:
         self.obs_map  = np.zeros((self.H, self.W), dtype=np.float32)
         self.obs_mask = np.zeros((self.H, self.W), dtype=np.float32)
         self.position = self.initial_position
-        self.trajectory = [self.initial_position]
+        self.trajectory = [[position] for position in self.initial_position]
+        print(self.trajectory)
 
         # Observe the starting cell
         self._observe(self.initial_position)
@@ -161,11 +162,12 @@ class ObservationScenario:
             r0, c0 = self.position[index]
             new_cells = _line_pixels(r0, c0, r1, c1)
 
+            print(f"Moving agent {index} from {(r0, c0)} to {(r1, c1)} through {len(new_cells)} new cells. accessing {self.trajectory}")
             self._observe(new_cells)
             self.trajectory[index].extend(new_cells)
             self.position[index] = (r1, c1)
 
-            return self.obs_map.copy(), self.obs_mask.copy()
+        return self.obs_map.copy(), self.obs_mask.copy()
 
     # ------------------------------------------------------------------
     def _observe(self, cells: list[tuple[int, int]]) -> None:
@@ -209,10 +211,11 @@ class ObservationScenario:
             for ax in axes:
                 ax.axis("off")
             
-            self._traj_line = []*len(self.position)
-            self._traj_dot = []*len(self.position)
+            self._traj_line = [[]]*len(self.trajectory)
+            self._traj_dot = [[]]*len(self.trajectory)
 
             for index, traj in enumerate(self.trajectory):
+                print(f"Trajectory {index}: {traj} on trajline {self._traj_line} and trajdot {self._traj_dot}")
                 traj = np.array(traj)
                 self._traj_line[index], = axes[3].plot(
                     traj[:, 1], traj[:, 0],
@@ -263,9 +266,10 @@ if __name__ == "__main__":
     env.render()
 
     waypoints = [
-        (np.random.randint(0, env.H), np.random.randint(0, env.W)) for _ in range(30)
+        [(np.random.randint(0, env.H), np.random.randint(0, env.W)) for _ in range(len(env.position))] for _ in range(30)
     ]
     for wp in waypoints:
+        print(f"Moving to {wp}...")
         obs_map, obs_mask = env.step(wp)
         coverage = obs_mask.mean() * 100
         print(f"  → moved to {wp}  |  coverage {coverage:.1f}%")

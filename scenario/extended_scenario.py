@@ -40,6 +40,8 @@ import matplotlib.pyplot as plt
 import yaml
 
 import torch
+import sys
+sys.path.append(str(Path(__file__).parent.parent))  # Add parent directory to sys.path
 
 from scenario import ObservationScenario
 
@@ -89,7 +91,7 @@ class ExtendedScenario(ObservationScenario):
         self.budget: float = float(budget if budget is not None else cfg.get("budget", 500))
         self.model = model
 
-        self._distance: float = 0.0
+        self._distance: list[float] = [0.0] * len(self.initial_position)
 
         # Last model outputs (for render)
         self._predicted_mean: np.ndarray | None = None
@@ -97,7 +99,7 @@ class ExtendedScenario(ObservationScenario):
 
     # ------------------------------------------------------------------
     def reset(self, map_idx: int | None = None) -> np.ndarray:
-        self._distance = 0.0
+        self._distance = [0.0] * len(self.initial_position)
         self._predicted_mean = None
         self._predicted_uncertainty = None
         return super().reset(map_idx)
@@ -120,10 +122,13 @@ class ExtendedScenario(ObservationScenario):
         if self.ground_truth is None:
             raise RuntimeError("Call reset() before step().")
 
-        r0, c0 = self.position   # position before the move
+        pos_before = self.position   # position before the move
         obs_map, obs_mask = super().step(action)
-        r1, c1 = self.position   # position after the move
-        self._distance += float(np.hypot(r1 - r0, c1 - c0))
+        pos_after = self.position   # position after the move
+        for pos_index in range(len(pos_before)):
+            r0, c0 = pos_before[pos_index]
+            r1, c1 = pos_after[pos_index]
+            self._distance[pos_index] += float(np.hypot(r1 - r0, c1 - c0))
 
         # ── Model prediction ─────────────────────────────────────────────
         output = self.model.predict({"obs_map": obs_map, "obs_mask": obs_mask})
@@ -154,7 +159,7 @@ class ExtendedScenario(ObservationScenario):
         union        = float((pred_mask | gt_mask).sum())
         iou = intersection / union if union > 0 else 1.0
 
-        done = self._distance >= self.budget
+        done = any(distance >= self.budget for distance in self._distance)
 
         obs = {
             "obs_map":               obs_map,
@@ -205,11 +210,21 @@ class ExtendedScenario(ObservationScenario):
                 ax.set_title(title, fontsize=10)
                 ax.axis("off")
 
-            traj = np.array(self.trajectory)
-            self._traj_line, = self._axes[3].plot(
-                traj[:, 1], traj[:, 0], color="cyan", linewidth=1.5, alpha=0.8)
-            self._traj_dot, = self._axes[3].plot(
-                [self.position[1]], [self.position[0]], "o", color="lime", markersize=6)
+            self._traj_line = [[]]*len(self.trajectory)
+            self._traj_dot = [[]]*len(self.trajectory)
+
+            
+            for index, traj in enumerate(self.trajectory):
+                print(f"Trajectory {index}: {traj} on trajline {self._traj_line} and trajdot {self._traj_dot}")
+                traj = np.array(traj)
+                self._traj_line[index], = axes[3].plot(
+                    traj[:, 1], traj[:, 0],
+                    color="cyan", linewidth=1.5, alpha=0.8,
+                )
+                self._traj_dot[index], = axes[3].plot(
+                    [self.position[index][1]], [self.position[index][0]],
+                    "o", color="lime", markersize=6,
+                )
 
             for ax, im in zip(self._axes[:4], [self._im_gt, self._im_obs, self._im_mask, self._im_traj]):
                 self._fig.colorbar(im, ax=ax, fraction=0.046)
@@ -232,11 +247,12 @@ class ExtendedScenario(ObservationScenario):
                 self._im_unc.set_data(unc)
                 self._im_unc.set_clim(vmin=0, vmax=max(float(unc.max()), 1e-6))
 
-            traj = np.array(self.trajectory)
-            self._traj_line.set_xdata(traj[:, 1])
-            self._traj_line.set_ydata(traj[:, 0])
-            self._traj_dot.set_xdata([self.position[1]])
-            self._traj_dot.set_ydata([self.position[0]])
+            for index, traj in enumerate(self.trajectory):
+                traj = np.array(traj)
+                self._traj_line[index].set_xdata(traj[:, 1])
+                self._traj_line[index].set_ydata(traj[:, 0])
+                self._traj_dot[index].set_xdata([self.position[index][1]])
+                self._traj_dot[index].set_ydata([self.position[index][0]])
 
             mse_str = ""
             if has_prediction:
@@ -247,7 +263,7 @@ class ExtendedScenario(ObservationScenario):
                     ))
                     mse_str = f"  |  MSE (unobs): {mse:.4f}"
             self._fig.suptitle(
-                f"Extended Scenario  —  dist {self._distance:.1f}/{self.budget:.0f} px{mse_str}",
+                f"Extended Scenario  —  dist {self._distance}/{self.budget:.0f} px{mse_str}",
                 fontsize=11,
             )
 
@@ -278,7 +294,8 @@ class ModelAdapter:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    from scenario.models.gaussian_process_model import GaussianProcessModel
+    sys.path.append(str(Path(__file__)))  # Add parent directory to sys.path
+    from models.gaussian_process_model import GaussianProcessModel
 
     cfg   = Path(__file__).parent / "scenario_config.yaml"
     model = ModelAdapter(GaussianProcessModel())
@@ -292,9 +309,9 @@ if __name__ == "__main__":
     rng = np.random.default_rng(0)
     done = False
     while not done:
-        wp = (int(rng.integers(0, env.H)), int(rng.integers(0, env.W)))
+        wp = [(np.random.randint(0, env.H), np.random.randint(0, env.W)) for _ in range(len(env.position))] 
         obs, done, info = env.step(wp)
-        print(f"  dist {info['distance']:6.1f}/{info['budget']:.0f} px  "
+        print(f"  dist {info['distance']}/{info['budget']:.0f} px  "
               f"→ {wp}  |  MSE(unobs)={info['mse']:.4f}  |  done={done}")
         env.render()
         plt.pause(0.3)
