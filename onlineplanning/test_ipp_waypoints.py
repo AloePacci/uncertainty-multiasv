@@ -7,8 +7,8 @@ import numpy as np
 from matplotlib.collections import LineCollection
 from matplotlib.colors import to_rgba
 
-from scenario.models.algorithms.forward_search import ForwardSearch
-from scenario.models.algorithms.mcts import MCTS, MCTSNode
+from scenario.policies.algorithms.forward_search import ForwardSearch
+from scenario.policies.algorithms.mcts import MCTS, MCTSNode
 from scenario.max_informative_path import generate_smooth_map
 from scenario.max_informative_path_waypoints import MaxInformativePathWaypoints, _shortest_path
 

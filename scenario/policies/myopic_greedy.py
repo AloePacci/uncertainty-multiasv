@@ -29,34 +29,39 @@ class MaxGreedyMiopic(Policy):
     def act(
         self,
         obs: dict,
-        position: tuple[int, int],
-    ) -> tuple[int, int]:
+        position: tuple[tuple[int, int], ...],
+            ) -> tuple[tuple[int, int],...]:
+
         model_value: np.ndarray = obs["predicted_mean"]
         uncertainty: np.ndarray = obs["predicted_uncertainty"]
         mask: np.ndarray = obs["obs_mask"]
         
         H, W = model_value.shape
-        r0, c0 = position
+        destinations = []
+        for pos in position:
+            r0, c0 = pos
 
-        rows, cols = np.mgrid[0:H, 0:W]
-        dist = np.hypot(rows - r0, cols - c0)
+            rows, cols = np.mgrid[0:H, 0:W]
+            dist = np.hypot(rows - r0, cols - c0)
 
-        within_radius = dist <= self.max_radius
-        
-        # Erode mask to ensure we only consider fully unobserved cells (not on the edge of observed area)
-        unobserved = np.logical_not(mask)
-        unobserved_eroded = binary_erosion(unobserved, structure=np.ones((3, 3)), border_value=0)
-        
-        candidates    = within_radius & (uncertainty != 0.0)  & unobserved_eroded # Only consider unobserved cells within radius
-        
-        if not candidates.any():
-            # Relax radius: pick global uncertainty maximum
-            candidates = np.ones((H, W), dtype=bool)
+            within_radius = dist <= self.max_radius
             
-        # Select the candidate cell with the highest value*uncertainty (or just uncertainty if you prefer)
-        scores = model_value * uncertainty  # You can also try just uncertainty
-        scores[~candidates] = -np.inf  # Exclude non-candidates
-        idx = np.argmax(scores)
-        r1, c1 = np.unravel_index(idx, (H, W))
+            # Erode mask to ensure we only consider fully unobserved cells (not on the edge of observed area)
+            unobserved = np.logical_not(mask)
+            unobserved_eroded = binary_erosion(unobserved, structure=np.ones((3, 3)), border_value=0)
+            
+            candidates    = within_radius & (uncertainty != 0.0)  & unobserved_eroded # Only consider unobserved cells within radius
+            
+            if not candidates.any():
+                # Relax radius: pick global uncertainty maximum
+                candidates = np.ones((H, W), dtype=bool)
+                
+            # Select the candidate cell with the highest value*uncertainty (or just uncertainty if you prefer)
+            scores = model_value * uncertainty  # You can also try just uncertainty
+            scores[~candidates] = -np.inf  # Exclude non-candidates
+            idx = np.argmax(scores)
+            r1, c1 = np.unravel_index(idx, (H, W))
+            destinations.append((int(r1), int(c1)))
+            mask[r1, c1] = True  # Mark this cell as observed for the next iteration
         
-        return int(r1), int(c1)
+        return tuple(destinations)

@@ -129,7 +129,6 @@ class ExperimentLogger:
         uncertainty: np.ndarray = obs["predicted_uncertainty"]
         predicted_mean: np.ndarray = obs["predicted_mean"]
 
-        row, col = position
         mse  = float(info["mse"])
         rmse = math.sqrt(mse) if mse >= 0 else float("nan")
         iou  = self._compute_iou(predicted_mean, ground_truth)
@@ -145,8 +144,7 @@ class ExperimentLogger:
             "mean_uncertainty": float(uncertainty.mean()),
             "coverage":         float(obs_mask.mean()) * 100.0,
             "map_idx":          int(map_idx),
-            "pos_x":            int(col),
-            "pos_y":            int(row),
+            "position":         position,
             "dataset_name":     dataset_name,
             "model_name":       model_name,
         })

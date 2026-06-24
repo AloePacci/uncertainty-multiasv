@@ -25,7 +25,7 @@ import time
 import matplotlib.pyplot as plt
 import numpy as np
 
-from scenario.models.algorithms.mcts import MCTS
+from scenario.policies.algorithms.mcts import MCTS
 from scenario.max_informative_path import MaxInformativePath, generate_smooth_map
 
 

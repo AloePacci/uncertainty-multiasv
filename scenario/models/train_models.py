@@ -37,6 +37,7 @@ from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 import sys
 sys.path.append(str(Path(__file__)))  # allow imports from scenario/
+sys.path.append(str(Path(__file__).parent))  # allow imports from scenario/
 from gaussian_process_model import GaussianProcessModel
 from MC_dropout_model import MCDropoutModel
 from MC_ensemble_model import EnsembleModel

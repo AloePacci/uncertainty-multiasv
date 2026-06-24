@@ -35,7 +35,9 @@ from pathlib import Path
 import numpy as np
 import matplotlib
 
-from scenario.models.train_models import weights_path
+sys.path.append(str(Path(__file__).parent))  # Add scenario/ to sys.path
+
+from models.train_models import weights_path
 matplotlib.use("Agg")          # headless-safe default; overridden below if rendering
 import matplotlib.pyplot as plt
 
@@ -91,11 +93,11 @@ def _make_mcts(budget: float) -> MCTSPolicy:
 
 
 POLICY_CATALOGUE: dict[str, callable] = {
-    "epsilon_greedy":     _make_epsilon_greedy,
+    # "epsilon_greedy":     _make_epsilon_greedy,
     "myopic_greedy":      _make_myopic_greedy,
-    "uncertainty_greedy": _make_uncertainty_greedy,
-    "orienteering":       _make_orienteering,
-    "mcts":                _make_mcts
+    # "uncertainty_greedy": _make_uncertainty_greedy,
+    # "orienteering":       _make_orienteering,
+    # "mcts":                _make_mcts
 }
 
 
@@ -141,7 +143,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--budget",    type=float, default=None,
                    help="Distance budget per episode (px). None = use config value")
     p.add_argument("--weights",   type=Path,
-                   default=ROOT / "models" / "weights" / "ensemble.pt",
+                   default=ROOT / ".." / "Weights",
                    help="Path to ensemble model weights")
     p.add_argument("--output",    type=Path,
                    default=ROOT / "results" / "experiments.csv",
@@ -283,8 +285,8 @@ def main() -> None:
         if not args.weights.exists():
             print(f"[ERROR] Ensemble weights not found: {args.weights}")
             sys.exit(1)
-        print(f"Loading EnsembleModel from {args.weights} …")
-        model_instances["ensemble"] = _make_ensemble(args.weights)
+        print(f"Loading EnsembleModel from {args.weights/'dataset_POINTWISE_Ensemble.pt'} …")
+        model_instances["ensemble"] = _make_ensemble(args.weights/'dataset_POINTWISE_Ensemble.pt')
 
     if "myopic" in model_names_req:
         print("Loading MyopicModel …")

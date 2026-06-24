@@ -36,7 +36,10 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np
 
-from onlineplanning.algorithms.problem import Problem
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent))  # allow imports from scenario/
+from problem import Problem
 
 # ────────────────────────────────────────────────────────────────────────── #
 # Constantes del dominio                                                     #

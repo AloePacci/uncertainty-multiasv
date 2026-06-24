@@ -41,8 +41,11 @@ import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 import numpy as np
 
-from onlineplanning.algorithms.problem import Problem
-from scenario.max_informative_path import _MIN_COST, _SQRT2, generate_smooth_map
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent))  # allow imports from scenario/
+from policies.algorithms.problem import Problem
+from max_informative_path import _MIN_COST, _SQRT2, generate_smooth_map
 
 # ────────────────────────────────────────────────────────────────────────── #
 # Tipos                                                                      #

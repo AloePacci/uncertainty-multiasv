@@ -25,8 +25,13 @@ import math
 import numpy as np
 
 from .base import Policy
-from onlineplanning.algorithms.mcts import MCTS
-from onlineplanning.scenarios.max_informative_path_waypoints import (
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent))  # allow imports from scenario/
+from algorithms.mcts import MCTS
+
+sys.path.append(str(Path(__file__).parent.parent))  # allow imports from scenario/
+from max_informative_path_waypoints import (
     MaxInformativePathWaypoints,
     _min_path_cost,
 )
