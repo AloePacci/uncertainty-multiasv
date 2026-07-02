@@ -122,9 +122,9 @@ class ExtendedScenario(ObservationScenario):
         if self.ground_truth is None:
             raise RuntimeError("Call reset() before step().")
 
-        pos_before = self.position   # position before the move
+        pos_before = self.position.copy()   # position before the move
         obs_map, obs_mask = super().step(action)
-        pos_after = self.position   # position after the move
+        pos_after = self.position.copy()   # position after the move
         for pos_index in range(len(pos_before)):
             r0, c0 = pos_before[pos_index]
             r1, c1 = pos_after[pos_index]

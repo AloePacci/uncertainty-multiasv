@@ -73,8 +73,7 @@ class ExperimentLogger:
         "mean_uncertainty",
         "coverage",
         "map_idx",
-        "pos_x",
-        "pos_y",
+        "position",
         "dataset_name",
         "model_name",
     ]

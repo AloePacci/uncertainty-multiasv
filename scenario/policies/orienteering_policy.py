@@ -38,7 +38,7 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib.lines import Line2D
 from scipy.ndimage import binary_dilation
-
+from collections import defaultdict
 from .base import Policy
 
 from tqdm import trange
@@ -82,10 +82,10 @@ class OrienteeringPolicy(Policy):
         self._rng = np.random.default_rng(rng_seed)
 
         # Episode state
-        self._plan: list[tuple[int, int]] = []
+        self._plan: list[ tuple[tuple[int, int], ...]] = []
         self._plan_idx: int = 0
         self._dist_since_replan: float = 0.0
-        self._last_position: tuple[int, int] | None = None
+        self._last_position:  tuple[tuple[int, int], ...] | None = None
 
 
     # ------------------------------------------------------------------ #
@@ -93,62 +93,71 @@ class OrienteeringPolicy(Policy):
     # ------------------------------------------------------------------ #
 
     def reset(self) -> None:
-        self._plan = []
-        self._plan_idx = 0
-        self._dist_since_replan = 0.0
-        self._last_position = None
+        self._plan = defaultdict(lambda: [])
+        self._plan_idx = defaultdict(lambda: 0)
+        self._dist_since_replan = defaultdict(lambda: 0.0)
+        self._last_position = defaultdict(lambda: None)
 
     def act(
         self,
         obs: dict,
-        position: tuple[int, int],
-    ) -> tuple[int, int]:
+        positions: tuple[tuple[int, int], ...],
+            ) -> tuple[tuple[int, int],...]:
         """
-        Return the next waypoint.
+        Return the next waypoints.
 
         Replans when no plan exists, the plan is exhausted, or H_ACT
         distance has accumulated since the last replan.
         """
         uncertainty: np.ndarray = obs["predicted_uncertainty"]
         obs_mask = obs["obs_mask"]
-        position = (int(position[0]), int(position[1]))
 
-        # Accumulate distance since last replan
-        if self._last_position is not None:
-            d = float(np.hypot(
-                position[0] - self._last_position[0],
-                position[1] - self._last_position[1],
-            ))
-            self._dist_since_replan += d
-        self._last_position = position
+        destinations = []
+        for index, pos in enumerate(positions):
+            position = (int(pos[0]), int(pos[1]))
 
-        need_replan = (
-            len(self._plan) == 0
-            or self._plan_idx >= len(self._plan)
-            or self._dist_since_replan >= self.h_act
-        )
+            # Accumulate distance since last replan
+            if self._last_position[index] is not None:
+                d = float(np.hypot(
+                    position[0] - self._last_position[index][0],
+                    position[1] - self._last_position[index][1],
+                ))
+                self._dist_since_replan[index] += d
+            self._last_position[index] = position
 
-        if need_replan:
-            self._plan = self._build_plan(uncertainty, obs_mask, position)
-            self._plan_idx = 0
-            self._dist_since_replan = 0.0
+            need_replan = (
+                len(self._plan[index]) == 0
+                or self._plan_idx[index] >= len(self._plan[index])
+                or self._dist_since_replan[index] >= self.h_act or obs_mask[self._plan[index][self._plan_idx[index]]]  # next waypoint already observed
+            )
 
-        # Skip waypoints already coinciding with current position
-        while (
-            self._plan_idx < len(self._plan)
-            and self._plan[self._plan_idx] == position
-        ):
-            self._plan_idx += 1
+            if need_replan:
+                self._plan[index] = self._build_plan(uncertainty, obs_mask, position)
+                self._plan_idx[index] = 0
+                self._dist_since_replan[index] = 0.0
 
-        if self._plan_idx < len(self._plan):
-            wp = self._plan[self._plan_idx]
-            self._plan_idx += 1
-            return wp
+            # Skip waypoints already coinciding with current position
+            while (
+                self._plan_idx[index] < len(self._plan[index])
+                and self._plan[index][self._plan_idx[index]] == position
+            ):
+                self._plan_idx[index] += 1
 
-        # Fallback: global uncertainty maximum (plan was empty or exhausted)
-        idx = int(np.argmax(uncertainty))
-        r, c = np.unravel_index(idx, uncertainty.shape)
-        return int(r), int(c)
+            if self._plan_idx[index] < len(self._plan[index]):
+                wp = self._plan[index][self._plan_idx[index]]
+                self._plan_idx[index] += 1
+                destinations.append(wp)
+                obs_mask[wp] = True  # Mark this cell as observed for the next iteration
+                continue
+
+
+            # Fallback: global uncertainty maximum (plan was empty or exhausted)
+            idx = int(np.argmax(uncertainty))
+            r, c = np.unravel_index(idx, uncertainty.shape)
+            destinations.append((int(r), int(c)))
+            obs_mask[r, c] = True  # Mark this cell as observed for the next iteration
+
+        return tuple(destinations)
 
     # ------------------------------------------------------------------ #
     # Candidate sampling                                                   #

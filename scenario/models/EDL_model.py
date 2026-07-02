@@ -298,11 +298,21 @@ class EDLModel:
             '_nig_params'              : dict of np.ndarrays (gamma, nu, alpha, beta)
                                          for advanced inspection / loss computation
         """
-        try:
-            X_t = X.detach().float()
-        except AttributeError:
-            X_t = torch.tensor(np.asarray(X), dtype=torch.float32)
-        X_t = X_t.to(self.device)
+        if type(X) is dict:
+            obs_map  = np.asarray(X["obs_map"],  dtype=np.float32)
+            obs_mask = np.asarray(X["obs_mask"], dtype=np.float32)
+            if obs_map.ndim == 2:
+                obs_map  = obs_map[np.newaxis]
+                obs_mask = obs_mask[np.newaxis]
+            # Build (B, 2, H, W): channel 0 = mask, channel 1 = values
+            X = np.stack([obs_mask, obs_map], axis=1)
+            X_t = torch.tensor(X, dtype=torch.float32).to(self.device)
+        else:
+            try:
+                X_t = X.detach().float()
+            except AttributeError:
+                X_t = torch.tensor(np.asarray(X), dtype=torch.float32)
+            X_t = X_t.to(self.device)
 
         self.net.eval()
         with torch.no_grad():

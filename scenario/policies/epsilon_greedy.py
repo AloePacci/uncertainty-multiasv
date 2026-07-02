@@ -37,48 +37,52 @@ class EpsilonGreedy(Policy):
     def act(
         self,
         obs: dict,
-        position: tuple[int, int],
-    ) -> tuple[int, int]:
+        position: tuple[tuple[int, int], ...],
+            ) -> tuple[tuple[int, int],...]:
         uncertainty: np.ndarray = obs["predicted_uncertainty"]
         value : np.ndarray = obs["predicted_mean"]
         obs_mask: np.ndarray    = obs["obs_mask"]
         H, W = uncertainty.shape
-        r0, c0 = position
-        
+        destinations = []
         # Compute current epsilon based on decay schedule
         epsilon = max(
             self.min_epsilon,
             self.max_epsilon - (self.max_epsilon - self.min_epsilon) * (self.step_count / self.eps_decay_steps)
         )
         self.step_count += 1
-        
-        rows, cols = np.mgrid[0:H, 0:W]
-        dist = np.hypot(rows - r0, cols - c0)
-        within_radius = dist <= self.max_radius
-        candidates = within_radius & (obs_mask == 0)  # Only consider unobserved cells within radius
+        for pos in position:
+            r0, c0 = pos
         
         
-        if not candidates.any():
-            # Relax radius: pick global uncertainty maximum
-            candidates = obs_mask == 0  # All unobserved cells
+            rows, cols = np.mgrid[0:H, 0:W]
+            dist = np.hypot(rows - r0, cols - c0)
+            within_radius = dist <= self.max_radius
+            candidates = within_radius & (obs_mask == 0)  # Only consider unobserved cells within radius
+        
+        
+            if not candidates.any():
+                # Relax radius: pick global uncertainty maximum
+                candidates = obs_mask == 0  # All unobserved cells
             
-        if np.random.rand() > epsilon:
-            # Explore: choose greedy with respect to uncertainty, 
-            candidate_indices = np.argwhere(candidates)
-            if len(candidate_indices) == 0:
-                # If no candidates are available, fallback to global max
-                idx = np.argmax(uncertainty)
-                r1, c1 = np.unravel_index(idx, (H, W))
+            if np.random.rand() > epsilon:
+                # Explore: choose greedy with respect to uncertainty, 
+                candidate_indices = np.argwhere(candidates)
+                if len(candidate_indices) == 0:
+                    # If no candidates are available, fallback to global max
+                    idx = np.argmax(uncertainty)
+                    r1, c1 = np.unravel_index(idx, (H, W))
+                else:
+                    random_idx = np.random.choice(len(candidate_indices))
+                    r1, c1 = candidate_indices[random_idx]
             else:
-                random_idx = np.random.choice(len(candidate_indices))
-                r1, c1 = candidate_indices[random_idx]
-        else:
-            # Exploit: choose candidate with highest value
-            scores = value  # You can also try just uncertainty
-            scores[~candidates] = -np.inf  # Exclude non-candidates
-            idx = np.argmax(scores)
-            r1, c1 = np.unravel_index(idx, (H, W))
+                # Exploit: choose candidate with highest value
+                scores = value  # You can also try just uncertainty
+                scores[~candidates] = -np.inf  # Exclude non-candidates
+                idx = np.argmax(scores)
+                r1, c1 = np.unravel_index(idx, (H, W))
+            destinations.append((int(r1), int(c1)))
+            obs_mask[r1, c1] = 1  # Mark the chosen cell as observed
 
         
         
-        return int(r1), int(c1)
+        return tuple(destinations)

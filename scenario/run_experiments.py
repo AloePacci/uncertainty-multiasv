@@ -93,10 +93,10 @@ def _make_mcts(budget: float) -> MCTSPolicy:
 
 
 POLICY_CATALOGUE: dict[str, callable] = {
-    # "epsilon_greedy":     _make_epsilon_greedy,
     "myopic_greedy":      _make_myopic_greedy,
-    # "uncertainty_greedy": _make_uncertainty_greedy,
-    # "orienteering":       _make_orienteering,
+    "uncertainty_greedy": _make_uncertainty_greedy,
+    "epsilon_greedy":     _make_epsilon_greedy,
+    "orienteering":       _make_orienteering,
     # "mcts":                _make_mcts
 }
 
@@ -113,12 +113,12 @@ def _make_ensemble(weights_path: Path) -> EnsembleModel:
     return model
 
 def _make_edl(weights_path: Path) -> EDLModel:
-    model = EDLModel(in_channels=2, base_channels=16, depth=3)
+    model = EDLModel(in_channels=2, base_channels=32, depth=4)
     model.load_weights(weights_path)
     return model
 
 def _make_mcdropout(weights_path: Path) -> MCDropoutModel:
-    model = MCDropoutModel(in_channels=2, base_channels=16, depth=3, dropout_p=0.2, n_samples=30)
+    model = MCDropoutModel(in_channels=2, base_channels=32, depth=4, dropout_p=0.2, n_samples=30)
     model.load_weights(weights_path)
     return model
 
@@ -211,7 +211,6 @@ def run_episode(
 
     done = False
     step = 0
-
     while not done:
         obs, done, info = env.step(action)
         step += 1
@@ -234,6 +233,7 @@ def run_episode(
 
         if not done:
             action = policy.act(obs, env.position)
+        # print(f"Step {step}  pos={env.position}  dist={info['distance']}  rmse={info['mse']**0.5}  cov={float(env.obs_mask.mean())*100}%  iou={info['iou']}")
 
     return {
         "steps":    step,
@@ -260,7 +260,7 @@ def main() -> None:
     )
     model_names_req = (
         [m.strip() for m in args.models.split(",")]
-        if args.models else ["ensemble"] #["gaussian_process", "ensemble"]
+        if args.models else ["gaussian_process", "ensemble", "myopic", "edl", "mcdropout"] 
     )
 
     unknown_p = set(policy_names) - set(all_policy_names)
@@ -269,7 +269,7 @@ def main() -> None:
         print(f"        Available: {all_policy_names}")
         sys.exit(1)
 
-    unknown_m = set(model_names_req) - {"gaussian_process", "ensemble", "myopic"}
+    unknown_m = set(model_names_req) - {"gaussian_process", "ensemble", "myopic", "edl", "mcdropout"}
     if unknown_m:
         print(f"[ERROR] Unknown models: {unknown_m}")
         sys.exit(1)
@@ -294,11 +294,11 @@ def main() -> None:
 
     if "edl" in model_names_req:
         print("Loading EDLModel …")
-        model_instances["edl"] = _make_edl(args.weights)
+        model_instances["edl"] = _make_edl(args.weights/'dataset_POINTWISE_EDL.pt')
 
     if "mcdropout" in model_names_req:
         print("Loading MCDropoutModel …")
-        model_instances["mcdropout"] = _make_mcdropout(args.weights)
+        model_instances["mcdropout"] = _make_mcdropout(args.weights/'dataset_POINTWISE_MC_Dropout.pt')
 
     # ── Setup ──────────────────────────────────────────────────────────────
     cfg = ROOT / "scenario_config.yaml"
@@ -358,12 +358,12 @@ def main() -> None:
                 )
                 done_count += 1
                 print(
-                    f"│  map {map_idx:3d}  "
-                    f"steps={summary['steps']:3d}  "
-                    f"dist={summary['distance']:6.1f}  "
-                    f"rmse={summary['rmse']:.4f}  "
-                    f"cov={summary['coverage']:5.1f}%  "
-                    f"iou={summary['iou']:.4f}  "
+                    f"│  map {map_idx}  "
+                    f"steps={summary['steps']}  "
+                    f"dist={summary['distance']}  "
+                    f"rmse={summary['rmse']}  "
+                    f"cov={summary['coverage']}%  "
+                    f"iou={summary['iou']}  "
                     f"[{done_count}/{total}]"
                 )
 
