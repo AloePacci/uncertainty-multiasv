@@ -46,7 +46,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent))  # allow imports from scenario/
 from policies.algorithms.problem import Problem
 from max_informative_path import _MIN_COST, _SQRT2, generate_smooth_map
-
+from collections import defaultdict
 # ────────────────────────────────────────────────────────────────────────── #
 # Tipos                                                                      #
 # ────────────────────────────────────────────────────────────────────────── #
@@ -60,7 +60,6 @@ CandidateFn = Callable[[dict], list[tuple[int, int]]]
 # ────────────────────────────────────────────────────────────────────────── #
 # Utilidades de camino                                                       #
 # ────────────────────────────────────────────────────────────────────────── #
-
 def _min_path_cost(start: tuple[int, int], end: tuple[int, int]) -> float:
     """
     Coste mínimo del camino entre dos celdas con 8 direcciones.
@@ -81,6 +80,56 @@ def _min_path_cost(start: tuple[int, int], end: tuple[int, int]) -> float:
     dx = abs(end[0] - start[0])
     dy = abs(end[1] - start[1])
     return min(dx, dy) * _SQRT2 + abs(dx - dy)
+
+
+def agent_priority_heuristic(state: dict) -> list[int]:
+    """
+    Heurística de prioridad de agentes: ordena por presupuesto restante.
+
+    Los agentes con menos presupuesto restante se planifican primero,
+    para evitar que se queden sin opciones mientras otros agentes
+    consumen el espacio de acciones.
+
+    Args:
+        state: Estado actual con 'budget' y 'position'.
+
+    Returns:
+        Lista de índices de agentes ordenados por prioridad.
+    """
+    budgets = state["budget"]
+    return sorted(range(len(budgets)), key=lambda i: budgets[i])
+
+
+def _ma_min_path_cost(start: tuple[tuple[int, int], ...], end: tuple[tuple[int, int], ...]) -> tuple[float, ...]:
+    """
+    Coste mínimo del camino entre dos celdas con 8 direcciones.
+
+    Con movimiento en 8 direcciones, el camino óptimo combina pasos
+    diagonales (coste √2) para cubrir ambas componentes a la vez, seguidos
+    de pasos rectos (coste 1) para la diferencia restante:
+
+        coste = min(|Δx|, |Δy|) · √2 + ||Δx| − |Δy||
+
+    Args:
+        start: Posición de origen (x, y).
+        end:   Posición de destino (x, y).
+
+    Returns:
+        Coste euclidiano mínimo del camino entre start y end.
+    """
+    costs = []
+    for s, e in zip(start, end):
+        if isinstance(s, list):
+            s = tuple(s)
+        if isinstance(e, list):
+            e = tuple(e)
+        if not (isinstance(s, tuple) and isinstance(e, tuple) and len(s) == 2 and len(e) == 2):
+            raise ValueError("start y end deben ser tuplas de coordenadas (x, y).")
+        dx = abs(e[0] - s[0])
+        dy = abs(e[1] - s[1])
+        cost = min(dx, dy) * _SQRT2 + abs(dx - dy)
+        costs.append(cost)
+    return costs
 
 
 def _shortest_path(
@@ -151,9 +200,9 @@ class MultiagentMaxInformativePathWaypoints(Problem):
     def __init__(
         self,
         info_map: np.ndarray,
-        max_budget: float,
+        max_budget: float | tuple[float, ...] | defaultdict[float],
         candidate_fn: CandidateFn | None = None,
-        initial_position: tuple[int, int] = (0, 0),
+        initial_position: tuple[tuple[int, int], ...] = ((0, 0),),
         gamma: float = 1.0,
         anneal_radius: int = 0,
         neg_reward: float = 0.0,
@@ -177,7 +226,11 @@ class MultiagentMaxInformativePathWaypoints(Problem):
         )
         self.info_map: np.ndarray = info_map.astype(float)
         self.N: int = info_map.shape[0]
-        self.max_budget: float = float(max_budget)
+        self.max_budget: float | tuple[float, ...] | defaultdict[float] = (
+            [float(max_budget)] * len(initial_position)
+            if isinstance(max_budget, (int, float))
+            else max_budget 
+        )
         self.candidate_fn: CandidateFn | None = candidate_fn
         self.gamma = gamma
         self.anneal_radius: int = max(0, anneal_radius)
@@ -216,12 +269,13 @@ class MultiagentMaxInformativePathWaypoints(Problem):
         Returns:
             Diccionario con campos 'position', 'budget' y 'visited'.
         """
-        start = self.initial_position
+        start = self.initial_position.copy()
         return {
             "position": start,
-            "budget":   self.max_budget,
-            "visited":  frozenset().union(*(self._anneal_map[pos] for pos in start)),
-            "last_position": start,
+            "budget":   self.max_budget.copy(),
+            "visited":  frozenset().union(*(self._anneal_map[(pos[0], pos[1])] for pos in start)),
+            "last_position": start.copy(),
+            "priority": agent_priority_heuristic({"budget": self.max_budget.copy()})
         }
 
     # ------------------------------------------------------------------ #
@@ -245,9 +299,9 @@ class MultiagentMaxInformativePathWaypoints(Problem):
         """
         if self.is_terminal(state):
             return []
-
-        pos = state["position"]
-        budget = state["budget"]
+        agent = state["priority"][0]  # agente con mayor prioridad
+        pos = state["position"][agent]
+        budget = state["budget"][agent]
 
         if self.candidate_fn is not None:
             return [
@@ -280,10 +334,11 @@ class MultiagentMaxInformativePathWaypoints(Problem):
         Returns:
             (next_state, total_reward).
         """
-        path = _shortest_path(state["position"], action)
+        agent = state["priority"][0]  # agente con mayor prioridad
+        path = _shortest_path(state["position"][agent], action)
         visited = state["visited"]
         total_reward = 0.0
-        last_position = state["position"]
+        last_position = state["position"].copy()
 
         for pos in path:
             if pos not in visited:
@@ -293,12 +348,22 @@ class MultiagentMaxInformativePathWaypoints(Problem):
                         total_reward += float(self.info_map[ny, nx]) - np.abs(self.neg_reward)
                         visited = visited | frozenset({nbr})
 
-        cost = _min_path_cost(state["position"], action)
+        cost = _min_path_cost(state["position"][agent], action)
+        new_budget = list(state["budget"])
+        new_budget[agent] -= cost
+        if len(state["priority"]) > 1:
+            priority = state["priority"][1:]
+        else:
+            priority = agent_priority_heuristic(state)
+        new_position = list(state["position"])
+        new_position[agent] = action
+
         next_state = {
-            "position": action,
-            "budget":   state["budget"] - cost,
+            "position": new_position,
+            "budget":   new_budget,
             "visited":  visited,
-            "last_position": last_position
+            "last_position": last_position,
+            "priority": priority
         }
         return next_state, total_reward - np.abs(self.neg_reward)
 
@@ -313,7 +378,8 @@ class MultiagentMaxInformativePathWaypoints(Problem):
         Returns:
             Suma de info_map de las celdas nuevas del trayecto y su vecindario.
         """
-        path = _shortest_path(state["position"], action)
+        agent = state["priority"][0]  # agente con mayor prioridad
+        path = _shortest_path(state["position"][agent], action)
         visited = state["visited"]
         total = 0.0
         for pos in path:
@@ -335,17 +401,21 @@ class MultiagentMaxInformativePathWaypoints(Problem):
         Returns:
             True si budget < 1.0.
         """
-        return state["budget"] < _MIN_COST
-
+        return any(budget < _MIN_COST for budget in state["budget"])
+    def is_action_node(self, state: dict) -> bool:
+        """
+        un nodo es de acción si no hay agentes que aún no hayan seleccionado acción
+        """
+        return len(state["priority"]) == len(state["budget"])
     def utility(self, state: dict) -> float:
         """
         Cota superior optimista de la información adicional colectable.
 
         Se calcula como la suma del valor de las celdas dentro de un radio igual al presupuesto restante
         """
-    
-        x, y = state["position"]
-        budget = state["budget"]
+        agent = state["priority"][0]  # agente con mayor prioridad
+        x, y = state["position"][agent]
+        budget = state["budget"][agent]
         max_distance = int(math.ceil(budget))
         total = 0.0
         for dy in range(-max_distance, max_distance + 1):
@@ -372,12 +442,15 @@ class MultiagentMaxInformativePathWaypoints(Problem):
             Cota superior de Q*(s, a).
         """
         immediate = self.reward(state, action)
-        path = _shortest_path(state["position"], action)
-        cost = _min_path_cost(state["position"], action)
+        agent = state["priority"][0]  # agente con mayor prioridad
+        path = _shortest_path(state["position"][agent], action)
+        cost = _min_path_cost(state["position"][agent], action)
         next_visited = state["visited"] | frozenset(path)
+        new_budget = list(state["budget"])
+        new_budget[agent] -= cost
         next_state = {
-            "position": action,
-            "budget":   state["budget"] - cost,
+            "position": state["position"],
+            "budget":   new_budget,
             "visited":  next_visited,
             "last_position" : state["position"]
         }
@@ -421,7 +494,8 @@ class MultiagentMaxInformativePathWaypoints(Problem):
         candidatos los devuelve todos sin muestreo.
         """
         def candidate_fn(state: dict) -> list[tuple[int, int]]:
-            pos = state["position"]
+            agent = state["priority"][0]  # agente con mayor prioridad
+            pos = state["position"][agent]
             visited = state["visited"]
             scored = []
             for x in range(self.N):
@@ -452,7 +526,8 @@ class MultiagentMaxInformativePathWaypoints(Problem):
         info_range = float(self.info_map.max() - info_min) or 1.0
 
         def candidate_fn(state: dict) -> list[tuple[int, int]]:
-            x, y = state["position"]
+            agent = state["priority"][0]  # agente con mayor prioridad
+            x, y = state["position"][agent]
             ratio = (float(self.info_map[y, x]) - info_min) / info_range
             
             if ratio > 0.8:
@@ -466,7 +541,7 @@ class MultiagentMaxInformativePathWaypoints(Problem):
                         continue
                     nx, ny = x + dx, y + dy
                     if 0 <= nx < self.N and 0 <= ny < self.N:
-                        if (nx,ny) != (state["last_position"]):
+                        if (nx,ny) != (state["last_position"][agent]):
                             candidates.append((nx, ny))
             return candidates
 
@@ -475,7 +550,8 @@ class MultiagentMaxInformativePathWaypoints(Problem):
     def candidates_8grid(self, resolution: int = 1) -> "CandidateFn":
         """8 vecinos (diagonales incluidas) a paso fijo `resolution`."""
         def candidate_fn(state: dict) -> list[tuple[int, int]]:
-            x, y = state["position"]
+            agent = state["priority"][0]  # agente con mayor prioridad
+            x, y = state["position"][agent]
             candidates = []
             for dx in (-resolution, 0, resolution):
                 for dy in (-resolution, 0, resolution):
@@ -491,7 +567,8 @@ class MultiagentMaxInformativePathWaypoints(Problem):
     def candidates_subgrid(self, resolution: int = 2) -> "CandidateFn":
         """Todos los puntos del mapa a paso `resolution` (grid regular)."""
         def candidate_fn(state: dict) -> list[tuple[int, int]]:
-            pos = state["position"]
+            agent = state["priority"][0]  # agente con mayor prioridad
+            pos = state["position"][agent]
             return [
                 (x, y)
                 for x in range(0, self.N, resolution)
@@ -523,7 +600,8 @@ class MultiagentMaxInformativePathWaypoints(Problem):
         Args:
             state: Estado a visualizar.
         """
-        x, y = state["position"]
+        agent = state["priority"][0]  # agente con mayor prioridad
+        x, y = state["position"][agent]
 
         # ── Actualizar historial de waypoints ────────────────────────── #
         if not self._waypoints or self._waypoints[-1] != (x, y):
@@ -549,7 +627,8 @@ class MultiagentMaxInformativePathWaypoints(Problem):
         )
 
         # ── Overlay azul sobre celdas visitadas ───────────────────────── #
-        for vx, vy in state["visited"]:
+        agent = state["priority"][0]  # agente con mayor prioridad
+        for vx, vy in state["visited"][agent]:
             ax.add_patch(
                 patches.Rectangle(
                     (vx - 0.5, vy - 0.5), 1.0, 1.0,
@@ -593,7 +672,7 @@ class MultiagentMaxInformativePathWaypoints(Problem):
 
         # ── Decoración ───────────────────────────────────────────────── #
         ax.set_title(
-            f"Budget: {state['budget']:.2f}  |  Visitadas: {len(state['visited'])}",
+            f"Budget: {state['budget'][agent]:.2f}  |  Visitadas: {len(state['visited'][agent])}",
             fontsize=11,
         )
         ax.set_xlim(-0.5, self.N - 0.5)

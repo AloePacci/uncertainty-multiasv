@@ -54,6 +54,7 @@ from policies import (
     MaxUncertaintyPolicy,
     OrienteeringPolicy,
     MCTSPolicy,
+    MAMCTSPolicy,
 )
 from models.gaussian_process_model import GaussianProcessModel
 from models.MC_ensemble_model import EnsembleModel
@@ -61,6 +62,7 @@ from models.myopic_model import MyopicModel
 from models.EDL_model import EDLModel
 from models.MC_dropout_model import MCDropoutModel
 
+from datetime import datetime
 
 # ── Policy catalogue ──────────────────────────────────────────────────────────
 
@@ -76,10 +78,10 @@ def _make_uncertainty_greedy() -> MaxUncertaintyPolicy:
 def _make_orienteering() -> OrienteeringPolicy:
     return OrienteeringPolicy(h_plan=30, h_act=5, grid_step=2, n_starts=1)
 
-def _make_mcts(budget: float) -> MCTSPolicy:
-    return MCTSPolicy(
+def _make_mcts(budget: float) -> MAMCTSPolicy:
+    return MAMCTSPolicy(
         budget=budget,
-        depth=budget,
+        depth=50,
         min_resolution=1,
         max_resolution=4,
         n_simulations=2000,
@@ -93,11 +95,11 @@ def _make_mcts(budget: float) -> MCTSPolicy:
 
 
 POLICY_CATALOGUE: dict[str, callable] = {
-    "myopic_greedy":      _make_myopic_greedy,
-    "uncertainty_greedy": _make_uncertainty_greedy,
-    "epsilon_greedy":     _make_epsilon_greedy,
-    "orienteering":       _make_orienteering,
-    # "mcts":                _make_mcts
+    # "myopic_greedy":      _make_myopic_greedy,
+    # "uncertainty_greedy": _make_uncertainty_greedy,
+    # "epsilon_greedy":     _make_epsilon_greedy,
+    # "orienteering":       _make_orienteering,
+    "mcts":                _make_mcts
 }
 
 
@@ -146,7 +148,7 @@ def parse_args() -> argparse.Namespace:
                    default=ROOT / ".." / "Weights",
                    help="Path to ensemble model weights")
     p.add_argument("--output",    type=Path,
-                   default=ROOT / "results" / "experiments.csv",
+                   default=ROOT / "results" / "experimentstest.csv",
                    help="Output CSV path")
     p.add_argument("--policies",  type=str, default=None,
                    help="Comma-separated subset of policies to run")
@@ -203,12 +205,12 @@ def run_episode(
     """
     Run one episode and return a summary dict.
     """
+    last_time = datetime.now().timestamp()
     policy.reset()
     logger.new_episode()
 
     gt = env.reset(map_idx=map_idx)
     action = policy.act(_bootstrap_obs(env), env.position)
-
     done = False
     step = 0
     while not done:
@@ -225,6 +227,7 @@ def run_episode(
             map_idx=map_idx,
             dataset_name=dataset_name,
             model_name=model_name,
+            mean_time=(datetime.now().timestamp() - last_time) / 1.0
         )
 
         if render:
@@ -233,6 +236,7 @@ def run_episode(
 
         if not done:
             action = policy.act(obs, env.position)
+        last_time = datetime.now().timestamp()
         # print(f"Step {step}  pos={env.position}  dist={info['distance']}  rmse={info['mse']**0.5}  cov={float(env.obs_mask.mean())*100}%  iou={info['iou']}")
 
     return {

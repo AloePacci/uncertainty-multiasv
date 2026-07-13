@@ -76,6 +76,7 @@ class ExperimentLogger:
         "position",
         "dataset_name",
         "model_name",
+        "mean_time",
     ]
 
     _SPILL_THRESHOLD: float = 0.05
@@ -104,6 +105,7 @@ class ExperimentLogger:
         map_idx: int,
         dataset_name: str,
         model_name: str,
+        mean_time: float | None = None,
     ) -> None:
         """
         Record one step.
@@ -146,6 +148,7 @@ class ExperimentLogger:
             "position":         position,
             "dataset_name":     dataset_name,
             "model_name":       model_name,
+            "mean_time":        mean_time,
         })
 
     def _compute_iou(

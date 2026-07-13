@@ -1,3 +1,4 @@
+import ast
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -12,6 +13,26 @@ filename = ROOT / "result_report.txt"
 
 sns.set_style("darkgrid")
 
+
+def _expand_distance_columns(results_df):
+    distances = results_df["distance"].apply(
+        lambda value: ast.literal_eval(value) if isinstance(value, str) else value
+    )
+
+    max_length = distances.map(len).max()
+    distance_columns = [f"dist_{idx + 1}" for idx in range(max_length)]
+
+    dist_expanded = pd.DataFrame(
+        distances.tolist(),
+        columns=distance_columns,
+        index=results_df.index,
+    )
+
+    results_df = pd.concat([results_df, dist_expanded], axis=1)
+    results_df["Distance (px)"] = results_df[distance_columns].mean(axis=1)
+
+    return results_df
+
 def plot_policy_comparison_ensemble(results_df):
     """
     Plots a comparison of different policies based on the results DataFrame.
@@ -20,20 +41,17 @@ def plot_policy_comparison_ensemble(results_df):
     results_df (pd.DataFrame): A DataFrame containing the results of different policies.
     """
 
-    
-    
     results_df = results_df[results_df['model_name'] == 'ensemble']  # Exclude the oracle policy for comparison
     
     results_df["RMSE_normalized"] = results_df.groupby(["experiment_id", "policy", "model_name"])["rmse"].transform(lambda x: x / x.iloc[0])  # Normalize RMSE by distance 
     
-    
-    results_df["distance_bin"] = pd.cut(results_df["distance"], bins=10).apply(lambda x: x.mid)  # Create distance bins for better visualization
+    results_df = _expand_distance_columns(results_df.copy())
 
     # Create a bar plot comparing the policies
     plt.figure(figsize=(7, 4))
     
     # Rename columns to beautify
-    results_df = results_df.rename(columns={"policy": "Policy", "distance_bin": "Distance (px)", "RMSE_normalized": "Normalized RMSE"})
+    results_df = results_df.rename(columns={"policy": "Policy", "RMSE_normalized": "Normalized RMSE"})
     
     # Rename the policies for better visualization
     policy_mapping = {
@@ -148,14 +166,13 @@ def plot_iou_lineplot(results_df):
     """
     
     results_df = results_df[results_df['model_name'] == 'ensemble']  # Exclude the oracle policy for comparison
-    
-    results_df["distance_bin"] = pd.cut(results_df["distance"], bins=10).apply(lambda x: x.mid)  # Create distance bins for better visualization
+    results_df = _expand_distance_columns(results_df.copy())
 
     # Create a line plot comparing the policies
     plt.figure(figsize=(7, 4))
     
     # Rename columns to beautify
-    results_df = results_df.rename(columns={"policy": "Policy", "distance_bin": "Distance (px)", "iou": "IoU"})
+    results_df = results_df.rename(columns={"policy": "Policy", "iou": "IoU"})
     
     # Rename the policies for better visualization
     policy_mapping = {
@@ -326,7 +343,7 @@ if __name__ == "__main__":
     results_df = pd.read_csv(ROOT / "experiments.csv")
 
     # Drop rows with distance greater than 300 for better visualization
-    results_df = results_df[results_df['distance'] <= 305]
+    # results_df = results_df[results_df['distance'] <= 305]
 
     # Plot the policy comparison
     plot_policy_comparison_ensemble(results_df)
@@ -340,7 +357,7 @@ if __name__ == "__main__":
     # Plot an example trajectory for a specific experiment ID
     example_experiment_id = 13  # Change this to the desired experiment ID
     # Load the maps for the example trajectory plot
-    maps = np.load(ROOT.parent.parent / "dataset" / "dataset_POINTWISE_eval" / "data_maps.npz")['maps']
+    maps = np.load(ROOT.parent.parent / "dataset" / "dataset_POINTWISE.npz")
     results_df = pd.read_csv(ROOT / "experiments.csv")
     plot_example_trajectory(results_df, maps, example_experiment_id)
 

@@ -76,7 +76,7 @@ RolloutPolicy = Callable[[dict], Any]
 # Nodo del árbol                                                               #
 # ──────────────────────────────────────────────────────────────────────────── #
 
-class MCTSNode:
+class MAMCTSNode:
     """
     Nodo del árbol de búsqueda MCTS.
 
@@ -104,24 +104,25 @@ class MCTSNode:
 
     __slots__ = (
         "state", "parent", "action_taken",
-        "children", "N", "Q", "N_total", "expanded", "cached_actions",
+        "children", "N", "Q", "N_total", "expanded", "cached_actions", "agent_order"
     )
 
     def __init__(
         self,
         state: dict,
-        parent: Optional["MCTSNode"] = None,
+        parent: Optional["MAMCTSNode"] = None,
         action_taken: Any = None,
     ) -> None:
         self.state: dict = state
-        self.parent: Optional["MCTSNode"] = parent
+        self.parent: Optional["MAMCTSNode"] = parent
         self.action_taken: Any = action_taken
-        self.children: dict[Any, "MCTSNode"] = {}
+        self.children: dict[Any, "MAMCTSNode"] = {}
         self.N: dict[Any, int] = {}
         self.Q: dict[Any, float] = {}
         self.N_total: int = 0
         self.expanded: bool = False
         self.cached_actions: list | None = None
+        self.agent_order: list | None = None
 
 
 
@@ -182,26 +183,26 @@ class MAMCTS:
         )
         self.reuse_tree = reuse_tree
         self.control_horizon: int = max(1, control_horizon)
-        self._root: Optional[MCTSNode] = None
+        self._root: Optional[MAMCTSNode] = None
         # Raíz de la última decisión (ANTES de avanzar al hijo elegido).
         # Permite renderizar el árbol completo desde el punto de decisión.
-        self._decision_root: Optional[MCTSNode] = None
+        self._decision_root: Optional[MAMCTSNode] = None
         # Cola de acciones pendientes cuando control_horizon > 1.
         # Cada entrada es (acción, nodo_siguiente) para poder avanzar _root
         # con reuse_tree aunque no se replantifique en ese paso.
-        self._action_queue: list[tuple[Any, Optional[MCTSNode]]] = []
+        self._action_queue: list[tuple[Any, Optional[MAMCTSNode]]] = []
 
     # ------------------------------------------------------------------ #
     # Interfaz pública                                                    #
     # ------------------------------------------------------------------ #
 
     @property
-    def root(self) -> Optional[MCTSNode]:
+    def root(self) -> Optional[MAMCTSNode]:
         """Raíz del árbol construido en la última llamada a select_action."""
         return self._root
 
     @property
-    def decision_root(self) -> Optional[MCTSNode]:
+    def decision_root(self) -> Optional[MAMCTSNode]:
         """Raíz del árbol en el punto de la última decisión (antes de avanzar).
 
         Con reuse_tree=True, self.root apunta al hijo elegido; esta propiedad
@@ -230,12 +231,12 @@ class MAMCTS:
             servidas desde la cola (no hay estimación Q del estado actual).
         """
         # ── Servir desde la cola si quedan acciones pendientes ─────────── #
-        if self._action_queue:
-            action, next_node = self._action_queue.pop(0)
-            if self.reuse_tree and next_node is not None:
-                next_node.parent = None
-                self._root = next_node
-            return (action, 0.0)
+        # if self._action_queue:
+        #     action, next_node = self._action_queue.pop(0)
+        #     if self.reuse_tree and next_node is not None:
+        #         next_node.parent = None
+        #         self._root = next_node
+        #     return (action, 0.0)
 
         # ── Determinar la raíz de esta planificación ──────────────────── #
         if (
@@ -245,55 +246,61 @@ class MAMCTS:
         ):
             root = self._root
         else:
-            root = MCTSNode(state)
+            root = MAMCTSNode(state)
 
         # ── Simulaciones ──────────────────────────────────────────────── #
         for _ in range(self.n_simulations):
             self._simulate(root, self.depth)
 
-        # ── Selección final: arg max_a Q(s, a) ────────────────────────── #
-        # IMPORTANTE: usar cached_actions cuando estén disponibles.
-        actions = root.cached_actions if root.cached_actions is not None \
-            else self.problem.get_actions(state)
-        if not actions:
-            self._decision_root = root
-            self._root = root
-            return (None, 0.0)
-        best_action = max(actions, key=lambda a: root.Q.get(a, float("-inf"))/ (root.N.get(a, 0) or 1))
-        best_value = root.Q.get(best_action, 0.0)
-
+        joint_actions=[]
+        joint_values=[]
         # ── Guardar raíz de decisión ANTES de avanzar ─────────────────── #
         self._decision_root = root
+        node = root
+        for agent_index in range(len(state["position"])):
+            # ── Selección final: arg max_a Q(s, a) ────────────────────────── #
+            # IMPORTANTE: usar cached_actions cuando estén disponibles.
+            actions = node.cached_actions if node.cached_actions is not None \
+                else self.problem.get_actions(node.state)
+            if not actions:
+                self._decision_root = root
+                self._root = root
+                return (None, 0.0)
+            best_action = max(actions, key=lambda a: node.Q.get(a, float("-inf"))/ (node.N.get(a, 0) or 1))
+            best_value = node.Q.get(best_action, 0.0)
+            
+            joint_actions.append(best_action)
+            joint_values.append(best_value)
+            node = node.children.get(best_action)
+
+
 
         # ── Rellenar cola con las acciones restantes del horizonte ─────── #
-        if self.control_horizon > 1:
-            node = root.children.get(best_action)
-            for _ in range(self.control_horizon - 1):
-                if node is None:
-                    break
-                acts = node.cached_actions if node.cached_actions is not None \
-                    else self.problem.get_actions(node.state)
-                if not acts:
-                    break
-                next_action = max(acts, key=lambda a: node.Q.get(a, float("-inf")/ (node.N.get(a, 0) or 1)))
-                next_node = node.children.get(next_action)
-                self._action_queue.append((next_action, next_node))
-                node = next_node
+        # if self.control_horizon > 1:
+        #     node = root.children.get(best_action)
+        #     for _ in range(self.control_horizon - 1):
+        #         if node is None:
+        #             break
+        #         acts = node.cached_actions if node.cached_actions is not None \
+        #             else self.problem.get_actions(node.state)
+        #         if not acts:
+        #             break
+        #         next_action = max(acts, key=lambda a: node.Q.get(a, float("-inf")/ (node.N.get(a, 0) or 1)))
+        #         next_node = node.children.get(next_action)
+        #         self._action_queue.append((next_action, next_node))
+        #         node = next_node
 
         # ── Avanzar la raíz para la próxima replanificación ───────────── #
-        if self.reuse_tree and best_action in root.children:
-            self._root = root.children[best_action]
-            self._root.parent = None
-        else:
-            self._root = root
+        self._root = node
+        self._root.parent = None
 
-        return (best_action, best_value)
+        return joint_actions, joint_values
 
     # ------------------------------------------------------------------ #
     # Fases internas de MCTS                                              #
     # ------------------------------------------------------------------ #
 
-    def _simulate(self, node: MCTSNode, depth: int) -> float:
+    def _simulate(self, node: MAMCTSNode, depth: int) -> float:
         """
         Ejecuta una simulación completa (selección → expansión → rollout →
         retropropagación) y devuelve el retorno estimado desde el nodo.
@@ -327,7 +334,7 @@ class MAMCTS:
 
         # Crear el nodo hijo si aún no existe en el árbol.
         if action not in node.children:
-            node.children[action] = MCTSNode(
+            node.children[action] = MAMCTSNode(
                 next_state, parent=node, action_taken=action
             )
         child = node.children[action]
@@ -344,7 +351,7 @@ class MAMCTS:
         node.Q[action] =  node.Q.get(action, 0.0) + q
         return q
 
-    def _ucb_action(self, node: MCTSNode) -> Any:
+    def _ucb_action(self, node: MAMCTSNode) -> Any:
         """
         Selecciona la acción que maximiza el criterio UCB1 en el nodo dado.
 

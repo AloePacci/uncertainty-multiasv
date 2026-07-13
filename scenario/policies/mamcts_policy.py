@@ -1,20 +1,20 @@
 """
-mcts_policy.py — MCTSPolicy: online MCTS-based informative path planning.
+mamcts_policy.py — Multi-agent MCTSPolicy: online MAMCTS-based informative path planning.
 
 Builds an information map as ``predicted_uncertainty × (1 − obs_mask)`` and
-uses MCTS with a ``MaxInformativePathWaypoints`` problem to select the next
+uses MAMCTS with a ``MultiagentMaxInformativePathWaypoints`` problem to select the next
 waypoint.
 
 When the model produces a new uncertainty estimate (detected by comparing
 ``predicted_uncertainty`` with the previous call), the planner is rebuilt and
-all queued open-loop actions are discarded.  Between such events, the MCTS
+all queued open-loop actions are discarded.  Between such events, the MAMCTS
 ``control_horizon`` parameter allows executing several pre-planned actions
 without re-running simulations.
 
 Coordinate conventions
 ----------------------
 The Policy API uses ``(row, col)`` = ``(y, x)`` in image space.
-``MaxInformativePathWaypoints`` uses ``(x, y)`` = ``(col, row)``.
+``MultiagentMaxInformativePathWaypoints`` uses ``(x, y)`` = ``(col, row)``.
 All conversions are handled internally.
 """
 
@@ -33,16 +33,17 @@ from algorithms.multiagent_mcts import MAMCTS
 sys.path.append(str(Path(__file__).parent.parent))  # allow imports from scenario/
 from multiagent_max_informative_path_waypoints import (
     MultiagentMaxInformativePathWaypoints,
-    _min_path_cost,
+    _ma_min_path_cost,
 )
 from scipy.ndimage import binary_dilation
-
-class MCTSPolicy(Policy):
+from collections import defaultdict
+from datetime import datetime
+class MAMCTSPolicy(Policy):
     """
     Online MCTS policy for informative path planning.
 
     On each call to ``act``, the information map ``uncertainty × (1 − mask)``
-    is built and passed to a ``MaxInformativePathWaypoints`` problem.  MCTS
+    is built and passed to a ``MultiagentMaxInformativePathWaypoints`` problem.  MAMCTS
     with ``candidates_adaptive`` selects the next waypoint.
 
     Parameters
@@ -50,12 +51,12 @@ class MCTSPolicy(Policy):
     budget : float
         Total path-length budget (pixels) available to the planner.
     n_simulations : int
-        Number of MCTS simulations run per replanning step.
+        Number of MAMCTS simulations run per replanning step.
     depth : int
         Maximum search-tree depth (and rollout horizon).
     control_horizon : int
         Number of steps to execute open-loop before replanning.
-        Forwarded to MCTS so the planner pre-queues the next
+        Forwarded to MAMCTS so the planner pre-queues the next
         ``control_horizon − 1`` actions after each full tree search.
     min_resolution : int
         Minimum step size for ``candidates_adaptive``.
@@ -64,7 +65,7 @@ class MCTSPolicy(Policy):
     anneal_radius : int
         Sensor footprint radius in cells (0 = single traversed cell).
     reuse_tree : bool
-        Whether to keep the MCTS sub-tree between consecutive steps.
+        Whether to keep the MAMCTS sub-tree between consecutive steps.
     gamma : float
         Discount factor.
     exploration_c : float
@@ -103,7 +104,7 @@ class MCTSPolicy(Policy):
         self._nagents = int(nagents)
 
         # Episode state
-        self._remaining_budget: float = self._budget
+        self._remaining_budget = self._budget
         self._problem: MultiagentMaxInformativePathWaypoints | None = None
         self._mcts: MAMCTS | None = None
         self._last_uncertainty: np.ndarray | None = None
@@ -124,7 +125,7 @@ class MCTSPolicy(Policy):
         position: tuple[tuple[int, int], ...],
     ) -> tuple[int, int]:
         """
-        Select the next waypoint using MCTS.
+        Select the next waypoint using MAMCTS.
 
         Parameters
         ----------
@@ -134,10 +135,11 @@ class MCTSPolicy(Policy):
 
         Returns
         -------
-        (row, col) — next waypoint.
+        ((row, col), ...) — next waypoint list.
         """
         uncertainty: np.ndarray = obs["predicted_uncertainty"]
         mask: np.ndarray = obs["obs_mask"]
+        start_time = datetime.now().timestamp()
 
         # Information map: uncertain AND unobserved cells are most valuable.
         
@@ -162,28 +164,30 @@ class MCTSPolicy(Policy):
 
         # Current MCTS state derived from the real environment.
         visited = _mask_to_visited(mask)
-        state: dict = {
-            "position": position,
-            "budget": self._remaining_budget,
-            "visited": visited,
-        }
+        state = self._mcts.problem.initial_state()
 
         # Query MCTS.
         action, _ = self._mcts.select_action(state)  # type: ignore[union-attr]
-
         if action is None:
-            # Fallback: global information maximum.
-            idx = int(np.argmax(info_map))
-            r, c = np.unravel_index(idx, info_map.shape)
-            return int(r), int(c)
+            action = []
+            aux_info_map = np.copy(info_map)
+            for i in range(len(position)):
+                idx = int(np.argmax(aux_info_map))
+                r, c = np.unravel_index(idx, info_map.shape)
+                action.append((r, c))
+                aux_info_map[r, c] = 0.0
+            return tuple(action)
 
         # Deduct movement cost from remaining budget.
-        cost = _min_path_cost(position, action)
-        self._remaining_budget = max(0.0, self._remaining_budget - cost)
+        cost = _ma_min_path_cost(position, action)
+        self._remaining_budget = []
+        for i in range(len(cost)):
+            self._remaining_budget.append(max(0.0, state["budget"][i] - cost[i]))
+        end_time = datetime.now().timestamp()
+        print(f"Selected action: {action} \n from position {position} \n with remaining budget {self._remaining_budget} \n time taken: {end_time - start_time} seconds \n  ------------------------------------------------------")
 
         # Scenario (x=col, y=row) → policy (row, col).
-        ax, ay = action
-        return int(ay), int(ax)
+        return action
 
     # ------------------------------------------------------------------ #
     # Internal helpers                                                     #
