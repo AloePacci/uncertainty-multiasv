@@ -137,7 +137,7 @@ class ExperimentLogger:
         self._records.append({
             "experiment_id":    self.experiment_id,
             "step":             int(step),
-            "distance":         info["distance"],
+            "distance":         info["distance"].copy(),
             "budget":           float(info["budget"]),
             "policy":           policy_name,
             "rmse":             rmse,
@@ -145,7 +145,7 @@ class ExperimentLogger:
             "mean_uncertainty": float(uncertainty.mean()),
             "coverage":         float(obs_mask.mean()) * 100.0,
             "map_idx":          int(map_idx),
-            "position":         position,
+            "position":         position.copy(),
             "dataset_name":     dataset_name,
             "model_name":       model_name,
             "mean_time":        mean_time,

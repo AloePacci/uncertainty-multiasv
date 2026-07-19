@@ -40,18 +40,18 @@ def plot_policy_comparison_ensemble(results_df):
     Parameters:
     results_df (pd.DataFrame): A DataFrame containing the results of different policies.
     """
-
-    results_df = results_df[results_df['model_name'] == 'ensemble']  # Exclude the oracle policy for comparison
+    results_df_ensemble = results_df[results_df['model_name'] == 'ensemble'].copy()  # Exclude the oracle policy for comparison
+    rmse_normalized = results_df_ensemble.groupby(["experiment_id", "policy", "model_name"])["rmse"].transform(lambda x: x / x.iloc[0])  # Normalize RMSE by distance 
     
-    results_df["RMSE_normalized"] = results_df.groupby(["experiment_id", "policy", "model_name"])["rmse"].transform(lambda x: x / x.iloc[0])  # Normalize RMSE by distance 
+    results_df_ensemble["RMSE_normalized"] = rmse_normalized
     
-    results_df = _expand_distance_columns(results_df.copy())
+    results_df_ensemble = _expand_distance_columns(results_df_ensemble.copy())
 
     # Create a bar plot comparing the policies
     plt.figure(figsize=(7, 4))
     
     # Rename columns to beautify
-    results_df = results_df.rename(columns={"policy": "Policy", "RMSE_normalized": "Normalized RMSE"})
+    results_df_ensemble = results_df_ensemble.rename(columns={"policy": "Policy", "RMSE_normalized": "Normalized RMSE"})
     
     # Rename the policies for better visualization
     policy_mapping = {
@@ -61,10 +61,10 @@ def plot_policy_comparison_ensemble(results_df):
         "mcts": "MCTS",
         "uncertainty_greedy": "Uncertainty Greedy",
     }
-    results_df["Policy"] = results_df["Policy"].replace(policy_mapping)
+    results_df_ensemble["Policy"] = results_df_ensemble["Policy"].replace(policy_mapping)
 
-    sns.lineplot(x='Distance (px)', y='Normalized RMSE', hue="Policy", data=results_df, markers=True, dashes=False, style="Policy", palette="tab10")
-    plt.xlim(results_df["Distance (px)"].min(), 300)  # Set x-axis limits based on the maximum distance
+    sns.lineplot(x='Distance (px)', y='Normalized RMSE', hue="Policy", data=results_df_ensemble, markers=True, dashes=False, style="Policy", palette="tab10")
+    plt.xlim(results_df_ensemble["Distance (px)"].min(), 300)  # Set x-axis limits based on the maximum distance
     
     plt.legend(loc="upper right", ncols=2)
 
@@ -86,8 +86,8 @@ def plot_policy_comparison_ensemble(results_df):
         "The RMSE is normalized by the error in the first step (distance) " \
         "to account for the varying difficulty of the experiments.", file=f)
 
-        for policy in results_df["Policy"].unique():
-            policy_df = results_df[results_df["Policy"] == policy]
+        for policy in results_df_ensemble["Policy"].unique():
+            policy_df = results_df_ensemble[results_df_ensemble["Policy"] == policy]
             avg_rmse = policy_df.groupby(["experiment_id"])["Normalized RMSE"].last().mean()
             std_rmse = policy_df.groupby(["experiment_id"])["Normalized RMSE"].last().std()
             f.write(f"Policy: {policy}, Average RMSE (normalized): {avg_rmse:.4f}, Std Dev: {std_rmse:.4f}\n")
@@ -104,7 +104,7 @@ def plot_boxplot_models(results_df):
         
     df["Normalized RMSE"] = df.groupby(["experiment_id", "policy", "model_name"])["rmse"].transform(lambda x: x / x.iloc[0])  # Normalize RMSE by distance
     
-    # Select the last entry for each experiment_id and policy and model to avoid duplicates
+    # Select the last entry for each experiment_id and policy and modeºl to avoid duplicates
     df = df.drop_duplicates(subset=['experiment_id', 'policy', 'model_name'], keep='last')
     
     df = df.rename(columns={"policy": "Policy", "distance_bin": "Distance (px)", "model_name": "Model"})
@@ -228,10 +228,12 @@ def plot_example_trajectory(results_df, maps, experiment_id):
     
     example_df['experiment_id'] = results_df['experiment_id'].apply(lambda x: x % 100)  # Modulo to wrap around experiment IDs if they exceed 200
     example_df = example_df[example_df['experiment_id'] == experiment_id]
+
     
     # Drop those rows with distance greater than 300 for better visualization
     
     n_subplots = len(example_df['Policy'].unique())
+    print(n_subplots)
     
     fig, axs = plt.subplots(1, n_subplots, figsize=(13, 4))
     
@@ -340,7 +342,7 @@ def heat_map_RMSE_policy_model(results_df):
 if __name__ == "__main__":
     
     # Load the results from a CSV file
-    results_df = pd.read_csv(ROOT / "experiments.csv")
+    results_df = pd.read_csv(ROOT / "experimentstest.csv")
 
     # Drop rows with distance greater than 300 for better visualization
     # results_df = results_df[results_df['distance'] <= 305]
@@ -355,10 +357,10 @@ if __name__ == "__main__":
     plot_iou_lineplot(results_df)
     
     # Plot an example trajectory for a specific experiment ID
-    example_experiment_id = 13  # Change this to the desired experiment ID
+    example_experiment_id = 2  # Change this to the desired experiment ID
     # Load the maps for the example trajectory plot
     maps = np.load(ROOT.parent.parent / "dataset" / "dataset_POINTWISE.npz")
-    results_df = pd.read_csv(ROOT / "experiments.csv")
+    results_df = pd.read_csv(ROOT / "experimentstest.csv")
     plot_example_trajectory(results_df, maps, example_experiment_id)
 
     # Plot the heatmap of RMSE by policy and model

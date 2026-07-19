@@ -95,11 +95,11 @@ def _make_mcts(budget: float) -> MAMCTSPolicy:
 
 
 POLICY_CATALOGUE: dict[str, callable] = {
-    # "myopic_greedy":      _make_myopic_greedy,
-    # "uncertainty_greedy": _make_uncertainty_greedy,
-    # "epsilon_greedy":     _make_epsilon_greedy,
-    # "orienteering":       _make_orienteering,
-    "mcts":                _make_mcts
+    "myopic_greedy":      _make_myopic_greedy,
+    "uncertainty_greedy": _make_uncertainty_greedy,
+    "epsilon_greedy":     _make_epsilon_greedy,
+    "orienteering":       _make_orienteering,
+    # "mcts":                _make_mcts
 }
 
 
@@ -148,7 +148,7 @@ def parse_args() -> argparse.Namespace:
                    default=ROOT / ".." / "Weights",
                    help="Path to ensemble model weights")
     p.add_argument("--output",    type=Path,
-                   default=ROOT / "results" / "experimentstest.csv",
+                   default=ROOT / "results" / "experiments.csv",
                    help="Output CSV path")
     p.add_argument("--policies",  type=str, default=None,
                    help="Comma-separated subset of policies to run")
@@ -214,8 +214,11 @@ def run_episode(
     done = False
     step = 0
     while not done:
+        print(f"current pos {env.position}")
         obs, done, info = env.step(action)
         step += 1
+        print(f"after pos {env.position}")
+
 
         logger.log_step(
             step=step,
