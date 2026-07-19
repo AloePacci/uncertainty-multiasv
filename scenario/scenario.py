@@ -127,8 +127,8 @@ class ObservationScenario:
 
         self.obs_map  = np.zeros((self.H, self.W), dtype=np.float32)
         self.obs_mask = np.zeros((self.H, self.W), dtype=np.float32)
-        self.position = self.initial_position
-        self.trajectory = [[position] for position in self.initial_position]
+        self.position = [pos.copy() for pos in self.initial_position]
+        self.trajectory = [[position.copy()] for position in self.initial_position]
         # print(self.trajectory)
 
         # Observe the starting cell

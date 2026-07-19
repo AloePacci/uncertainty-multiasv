@@ -61,7 +61,7 @@ def plot_policy_comparison_ensemble(results_df):
         "mcts": "MCTS",
         "uncertainty_greedy": "Uncertainty Greedy",
     }
-    results_df_ensemble["Policy"] = results_df_ensemble["Policy"].replace(policy_mapping)
+    results_df_ensemble.loc[:, "Policy"] = results_df_ensemble["Policy"].replace(policy_mapping)
 
     sns.lineplot(x='Distance (px)', y='Normalized RMSE', hue="Policy", data=results_df_ensemble, markers=True, dashes=False, style="Policy", palette="tab10")
     plt.xlim(results_df_ensemble["Distance (px)"].min(), 300)  # Set x-axis limits based on the maximum distance
@@ -182,7 +182,7 @@ def plot_iou_lineplot(results_df):
         "mcts": "MCTS",
         "uncertainty_greedy": "Uncertainty Greedy",
     }
-    results_df["Policy"] = results_df["Policy"].replace(policy_mapping)
+    results_df.loc[:, "Policy"] = results_df["Policy"].replace(policy_mapping)
 
     sns.lineplot(x='Distance (px)', y='IoU', hue="Policy", data=results_df, markers=True, dashes=False, style="Policy", palette="tab10")
     plt.xlim(results_df["Distance (px)"].min(), 300)  # Set x-axis limits based on the maximum distance
@@ -212,7 +212,7 @@ def plot_iou_lineplot(results_df):
     
 def plot_example_trajectory(results_df, maps, experiment_id):
 
-    results_df = results_df[results_df['model_name'] == 'ensemble']  # Exclude the oracle policy for comparison
+    # results_df = results_df[results_df['model_name'] == 'ensemble']  # Exclude the oracle policy for comparison
     
     policy_mapping = {
         "epsilon_greedy": r"$\epsilon$-greedy",
@@ -221,19 +221,16 @@ def plot_example_trajectory(results_df, maps, experiment_id):
         "mcts": "MCTS",
         "uncertainty_greedy": "Uncertainty Greedy",
     }
-    results_df["Policy"] = results_df["policy"].replace(policy_mapping)
+    results_df.loc[:, "Policy"] = results_df["policy"].replace(policy_mapping)
 
     
     example_df = results_df.copy()
     
-    example_df['experiment_id'] = results_df['experiment_id'].apply(lambda x: x % 100)  # Modulo to wrap around experiment IDs if they exceed 200
+    # example_df.loc[:,'experiment_id'] = results_df['experiment_id'].apply(lambda x: x % 100)  # Modulo to wrap around experiment IDs if they exceed 200
     example_df = example_df[example_df['experiment_id'] == experiment_id]
-
-    
     # Drop those rows with distance greater than 300 for better visualization
     
     n_subplots = len(example_df['Policy'].unique())
-    print(n_subplots)
     
     fig, axs = plt.subplots(1, n_subplots, figsize=(13, 4))
     
@@ -247,14 +244,20 @@ def plot_example_trajectory(results_df, maps, experiment_id):
         ax.set_aspect('equal')  # Set equal aspect ratio for correct spatial representation
         ax.grid(False)  # Disable grid for better visualization
         # Extract X, Y coordinates from the trajectory column for the given experiment_id and policy
-        x = policy_df['pos_x'].values
-        y = policy_df['pos_y'].values
-        
-        trajectory = np.asarray([x, y], dtype=int).T  # Convert X and Y columns to a numpy array of shape (n_steps, 2)
-        
-    
+        positions = policy_df["position"].values
+        trajectories = np.array([[] for _ in range(4)], dtype=int).tolist()  # Initialize a list of empty lists for each trajectory
+        for idx_pos in range(len(positions)):
+            position = ast.literal_eval(positions[idx_pos]) if isinstance(positions[idx_pos], str) else positions[idx_pos]
+            
+            for idx, pos in enumerate(position):
+                x, y = pos  
+                trajectories[idx].append(np.asarray([x, y], dtype=int))
+        colors = ['r-', 'g-', 'b-', 'c-']  # Define colors for each trajectory
+
         ax.imshow(maps[experiment_id - 1], cmap='viridis', interpolation='bicubic')  # Display the map as a background
-        ax.plot(trajectory[:, 0], trajectory[:, 1], 'r-', marker='.', label=policy, alpha=0.5)  # Plot the trajectory on top of the map
+        for color_idx, trajectory in enumerate(trajectories):
+            trajectory = np.asarray(trajectory, dtype=int)  # Convert X and Y columns to a numpy array of shape (n_steps, 2)
+            ax.plot(trajectory[:, 0], trajectory[:, 1], colors[color_idx], marker='.', label=policy, alpha=0.5)  # Plot the trajectory on top of the map
         
         ax.set_title(f"{policy}")
         
@@ -297,13 +300,13 @@ def heat_map_RMSE_policy_model(results_df):
         "mcts": "MCTS",
         "uncertainty_greedy": "Uncertainty Greedy",
     }
-    df["Policy"] = df["Policy"].replace(policy_mapping)
+    df.loc[:, "Policy"] = df["Policy"].replace(policy_mapping)
     
     model_mapping = {
         "ensemble": "Deep Ensemble",
         "gaussian_process": "Gaussian Process",
     }
-    df["Model"] = df["Model"].replace(model_mapping)
+    df.loc[:, "Model"] = df["Model"].replace(model_mapping)
      
     pivot_table = df.pivot_table(index='Model', columns='Policy', values='Normalized RMSE', aggfunc='mean')
     
@@ -340,9 +343,9 @@ def heat_map_RMSE_policy_model(results_df):
 
     
 if __name__ == "__main__":
-    
+    pd.options.mode.chained_assignment = None
     # Load the results from a CSV file
-    results_df = pd.read_csv(ROOT / "experimentstest.csv")
+    results_df = pd.read_csv(ROOT / "experimentstest2.csv")
 
     # Drop rows with distance greater than 300 for better visualization
     # results_df = results_df[results_df['distance'] <= 305]
@@ -357,12 +360,13 @@ if __name__ == "__main__":
     plot_iou_lineplot(results_df)
     
     # Plot an example trajectory for a specific experiment ID
-    example_experiment_id = 2  # Change this to the desired experiment ID
+    example_experiment_id = 236  # Change this to the desired experiment ID
     # Load the maps for the example trajectory plot
     maps = np.load(ROOT.parent.parent / "dataset" / "dataset_POINTWISE.npz")
-    results_df = pd.read_csv(ROOT / "experimentstest.csv")
+    maps = maps["ground_truth"]
+    results_df = pd.read_csv(ROOT / "experimentstest2.csv")
     plot_example_trajectory(results_df, maps, example_experiment_id)
-
+    results_df = pd.read_csv(ROOT / "experimentstest2.csv")
     # Plot the heatmap of RMSE by policy and model
     heat_map_RMSE_policy_model(results_df)
     

@@ -1,0 +1,39 @@
+--------------------------------------------------
+Policy Comparison Report:
+
+The model is ENSEMBLE for this comparison.The RMSE is normalized by the error in the first step (distance) to account for the varying difficulty of the experiments.
+Policy: Value Greedy, Average RMSE (normalized): 0.9046, Std Dev: 0.3063
+Policy: Uncertainty Greedy, Average RMSE (normalized): 0.8518, Std Dev: 0.1654
+Policy: $\epsilon$-greedy, Average RMSE (normalized): 0.6658, Std Dev: 0.1847
+Policy: Receeding Horizon Orienteering, Average RMSE (normalized): 0.8004, Std Dev: 0.2373
+Policy: MCTS, Average RMSE (normalized): 0.8162, Std Dev: 0.1370
+
+--------------------------------------------------
+Model Comparison Report:
+
+Comparison between different models based on their normalized RMSE.
+Model: Gaussian Process, Average RMSE (normalized): 0.9021, Std Dev: 0.4346
+Model: Deep Ensemble, Average RMSE (normalized): 0.7807, Std Dev: 0.2208
+Model: myopic, Average RMSE (normalized): 0.5892, Std Dev: 0.3035
+Model: edl, Average RMSE (normalized): 0.2641, Std Dev: 0.2270
+Model: mcdropout, Average RMSE (normalized): 0.7246, Std Dev: 0.1744
+
+--------------------------------------------------
+IoU Comparison Report:
+
+Comparison of IoU across different policies using the ENSEMBLE model.
+Policy: Value Greedy, Average IoU: 0.6383, Std Dev: 0.1572
+Policy: Uncertainty Greedy, Average IoU: 0.6640, Std Dev: 0.1648
+Policy: $\epsilon$-greedy, Average IoU: 0.7579, Std Dev: 0.0970
+Policy: Receeding Horizon Orienteering, Average IoU: 0.7633, Std Dev: 0.0744
+Policy: MCTS, Average IoU: 0.5149, Std Dev: 0.2475
+
+--------------------------------------------------
+Heatmap of RMSE by Policy and Model Report:
+
+This heatmap shows the average RMSE for each combination of policy and model. The RMSE is normalized by the error in the first step (distance) to account for the varying difficulty of the experiments.
+Model: Gaussian Process, Average RMSE (normalized): 0.1154, Std Dev: 0.0615
+Model: Deep Ensemble, Average RMSE (normalized): 0.0766, Std Dev: 0.0221
+Model: myopic, Average RMSE (normalized): 0.0806, Std Dev: 0.0400
+Model: edl, Average RMSE (normalized): 0.0166, Std Dev: 0.0049
+Model: mcdropout, Average RMSE (normalized): 0.0724, Std Dev: 0.0206
