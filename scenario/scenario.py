@@ -87,8 +87,13 @@ class ObservationScenario:
         self.maps: np.ndarray = data[key]          # (N, H, W) float32
 
         self.H, self.W = self.maps.shape[1], self.maps.shape[2]
+        self.mask = np.ones((self.H, self.W), dtype=np.float32)
+        self.mask[:8, :] = self.mask[-8:, :] = 0
+        self.mask[:, :8] = self.mask[:, -8:] = 0
         self.initial_position: tuple[tuple[int, int], ...] = cfg["initial_position"]
         self.noise_std: float = float(cfg.get("noise_std", 0.0))
+
+        self.n_agents = len(self.initial_position)
 
         self._rng = np.random.default_rng()
 

@@ -160,6 +160,10 @@ class ExtendedScenario(ObservationScenario):
         iou = intersection / union if union > 0 else 1.0
 
         done = any(distance >= self.budget for distance in self._distance)
+        obs_map = obs_map * self.mask
+        obs_mask = obs_mask * self.mask
+        mean = mean * self.mask
+        uncertainty = uncertainty * self.mask
 
         obs = {
             "obs_map":               obs_map,

@@ -245,29 +245,26 @@ def plot_example_trajectory(results_df, maps, experiment_id):
         ax.grid(False)  # Disable grid for better visualization
         # Extract X, Y coordinates from the trajectory column for the given experiment_id and policy
         positions = policy_df["position"].values
+        model=policy_df["model_name"].values[0]  # Assuming model_name is consistent for the same policy and experiment_id
         trajectories = np.array([[] for _ in range(4)], dtype=int).tolist()  # Initialize a list of empty lists for each trajectory
         for idx_pos in range(len(positions)):
             position = ast.literal_eval(positions[idx_pos]) if isinstance(positions[idx_pos], str) else positions[idx_pos]
             
             for idx, pos in enumerate(position):
-                x, y = pos  
+                y, x = pos  
                 trajectories[idx].append(np.asarray([x, y], dtype=int))
         colors = ['r-', 'g-', 'b-', 'c-']  # Define colors for each trajectory
 
-        ax.imshow(maps[experiment_id - 1], cmap='viridis', interpolation='bicubic')  # Display the map as a background
+        ax.imshow(maps[(experiment_id - 1)%10], cmap='viridis', interpolation='bicubic')  # Display the map as a background
         for color_idx, trajectory in enumerate(trajectories):
             trajectory = np.asarray(trajectory, dtype=int)  # Convert X and Y columns to a numpy array of shape (n_steps, 2)
             ax.plot(trajectory[:, 0], trajectory[:, 1], colors[color_idx], marker='.', label=policy, alpha=0.5)  # Plot the trajectory on top of the map
         
-        ax.set_title(f"{policy}")
+        ax.set_title(f"{policy}\n{model}")
         
         
         ax.set_xlabel("X")
-        if idx == 0:  # Only set y-label for the first subplot to avoid clutter
-            
-            ax.set_ylabel("Y")
-        else:
-            ax.set_yticks([])  # Hide y-ticks for other subplots for better visualization
+        ax.set_ylabel("Y")
     
     plt.tight_layout()
     #plt.show()
@@ -340,33 +337,40 @@ def heat_map_RMSE_policy_model(results_df):
     
 
 
+def print_example_trajectory_report(results_df, maps, experiment_id):
+    example_df = results_df[results_df['experiment_id'] == experiment_id]
+    rmse = example_df["rmse"].values[-1]
+    iou = example_df["iou"].values[-1]
+    print(f"\nExample Trajectory Report for Experiment ID {experiment_id}:\n")
+    print(f"RMSE: {rmse:.4f}, IoU: {iou:.4f}")
 
-    
 if __name__ == "__main__":
     pd.options.mode.chained_assignment = None
     # Load the results from a CSV file
-    results_df = pd.read_csv(ROOT / "experimentstest2.csv")
+    # results_df = pd.read_csv(ROOT / "experimentstest2.csv")
 
-    # Drop rows with distance greater than 300 for better visualization
-    # results_df = results_df[results_df['distance'] <= 305]
+    # # Drop rows with distance greater than 300 for better visualization
+    # # results_df = results_df[results_df['distance'] <= 305]
 
-    # Plot the policy comparison
-    plot_policy_comparison_ensemble(results_df)
+    # # Plot the policy comparison
+    # plot_policy_comparison_ensemble(results_df)
     
-    # Plot the boxplot of models
-    plot_boxplot_models(results_df)
+    # # Plot the boxplot of models
+    # plot_boxplot_models(results_df)
     
-    # Plot the IoU line plot
-    plot_iou_lineplot(results_df)
+    # # Plot the IoU line plot
+    # plot_iou_lineplot(results_df)
     
     # Plot an example trajectory for a specific experiment ID
-    example_experiment_id = 236  # Change this to the desired experiment ID
+    example_experiment_id = 5  # Change this to the desired experiment ID
     # Load the maps for the example trajectory plot
     maps = np.load(ROOT.parent.parent / "dataset" / "dataset_POINTWISE.npz")
     maps = maps["ground_truth"]
-    results_df = pd.read_csv(ROOT / "experimentstest2.csv")
-    plot_example_trajectory(results_df, maps, example_experiment_id)
-    results_df = pd.read_csv(ROOT / "experimentstest2.csv")
-    # Plot the heatmap of RMSE by policy and model
-    heat_map_RMSE_policy_model(results_df)
+    results_df = pd.read_csv(ROOT / "experiments2.csv")
+    for example_experiment_id in range(1, 1+len(results_df['experiment_id'].unique())):
+        plot_example_trajectory(results_df, maps, example_experiment_id)
+        print_example_trajectory_report(results_df, maps, example_experiment_id)
+    # results_df = pd.read_csv(ROOT / "experimentstest2.csv")
+    # # Plot the heatmap of RMSE by policy and model
+    # heat_map_RMSE_policy_model(results_df)
     

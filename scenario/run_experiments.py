@@ -95,11 +95,11 @@ def _make_mcts(budget: float) -> MAMCTSPolicy:
 
 
 POLICY_CATALOGUE: dict[str, callable] = {
-    "myopic_greedy":      _make_myopic_greedy,
-    "uncertainty_greedy": _make_uncertainty_greedy,
-    "epsilon_greedy":     _make_epsilon_greedy,
-    "orienteering":       _make_orienteering,
-    # "mcts":                _make_mcts
+    # "myopic_greedy":      _make_myopic_greedy,
+    # "uncertainty_greedy": _make_uncertainty_greedy,
+    # "epsilon_greedy":     _make_epsilon_greedy,
+    # "orienteering":       _make_orienteering,
+    "mcts":                _make_mcts
 }
 
 
@@ -148,7 +148,7 @@ def parse_args() -> argparse.Namespace:
                    default=ROOT / ".." / "Weights",
                    help="Path to ensemble model weights")
     p.add_argument("--output",    type=Path,
-                   default=ROOT / "results" / "experiments.csv",
+                   default=ROOT / "results" / "experimentsmc.csv",
                    help="Output CSV path")
     p.add_argument("--policies",  type=str, default=None,
                    help="Comma-separated subset of policies to run")
@@ -213,6 +213,28 @@ def run_episode(
     action = policy.act(_bootstrap_obs(env), env.position)
     done = False
     step = 0
+    logger.log_step(
+            step=step,
+            info={
+                "mse": float("nan"),
+                "distance": [0.0 for _ in range(env.n_agents)],
+                "budget": env.budget,
+                "iou": float("nan"),
+            },
+            obs={
+                "obs_map":               np.zeros((env.H, env.W), dtype=np.float32),
+                "obs_mask":              np.zeros((env.H, env.W), dtype=np.float32),
+                "predicted_mean":        np.zeros((env.H, env.W), dtype=np.float32),
+                "predicted_uncertainty": np.ones( (env.H, env.W), dtype=np.float32),
+            },
+            ground_truth=env.ground_truth,
+            position=env.position,
+            policy_name=policy_name,
+            map_idx=map_idx,
+            dataset_name=dataset_name,
+            model_name=model_name,
+            mean_time=(datetime.now().timestamp() - last_time) / 1.0
+        )
     while not done:
         print(f"current pos {env.position}")
         obs, done, info = env.step(action)
