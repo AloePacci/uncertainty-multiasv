@@ -210,7 +210,7 @@ def plot_iou_lineplot(results_df):
             std_last_iou = policy_df.groupby(["experiment_id"])["IoU"].last().std()
             f.write(f"Policy: {policy}, Average IoU: {avg_last_iou:.4f}, Std Dev: {std_last_iou:.4f}\n")
     
-def plot_example_trajectory(results_df, maps, experiment_id):
+def plot_example_trajectory(results_df, maps, experiment_id, show_plot=False):
 
     # results_df = results_df[results_df['model_name'] == 'ensemble']  # Exclude the oracle policy for comparison
     
@@ -267,10 +267,12 @@ def plot_example_trajectory(results_df, maps, experiment_id):
         ax.set_ylabel("Y")
     
     plt.tight_layout()
-    #plt.show()
-    plt.savefig(ROOT / f"example_trajectory_experiment_{experiment_id}.png", dpi=300)  # Save the figure with high resolution
-    # Save also as svg for better quality in publications
-    plt.savefig(ROOT / f"example_trajectory_experiment_{experiment_id}.svg")
+    if show_plot:
+        plt.show()
+    else:
+        plt.savefig(ROOT / f"example_trajectory_experiment_{experiment_id}.png", dpi=300)  # Save the figure with high resolution
+        # Save also as svg for better quality in publications
+        plt.savefig(ROOT / f"example_trajectory_experiment_{experiment_id}.svg")
     
 def heat_map_RMSE_policy_model(results_df):
     """

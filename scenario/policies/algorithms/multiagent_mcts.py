@@ -291,7 +291,7 @@ class MAMCTS:
         #         node = next_node
 
         # ── Avanzar la raíz para la próxima replanificación ───────────── #
-        self._root = node
+        self._root = node if node is not None else root
         self._root.parent = None
 
         return joint_actions, joint_values

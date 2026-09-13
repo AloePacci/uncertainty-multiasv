@@ -80,10 +80,10 @@ def _make_orienteering() -> OrienteeringPolicy:
 def _make_mcts(budget: float) -> MAMCTSPolicy:
     return MAMCTSPolicy(
         budget=budget,
-        depth=20,
+        depth=50,
         min_resolution=1,
         max_resolution=4,
-        n_simulations=200,
+        n_simulations=500,
         anneal_radius=1,
         control_horizon=0,
         reuse_tree=True,
@@ -207,14 +207,14 @@ def run_episode(
     last_time = datetime.now().timestamp()
     policy.reset()
     gt = env.reset(map_idx=map_idx)
-    model_mean_time = (datetime.now().timestamp() - last_time) / 1.0,
+    model_mean_time = datetime.now().timestamp()
     action = policy.act(_bootstrap_obs(env), env.position)
     done = False
     step = 0
     logger.write(
         run = map_idx, step = step,
         mse = float("nan"),
-        distance = [0.0 for _ in range(env.n_agents)],
+        distance = np.asarray([0.0 for _ in range(env.n_agents)], dtype=np.float32),
         budget = env.budget,
         iou = float("nan"),
         obs_map = np.zeros((env.H, env.W), dtype=np.float32),
@@ -222,14 +222,14 @@ def run_episode(
         predicted_mean = np.zeros((env.H, env.W), dtype=np.float32),
         predicted_uncertainty = np.ones((env.H, env.W), dtype=np.float32),
         ground_truth = env.ground_truth,
-        position = env.position,
+        position = np.asarray(env.position),
         policy_name = policy_name,
         map_idx = map_idx,
         dataset_name = dataset_name,
         model_name = model_name,
-        model_mean_time = model_mean_time,
-        policy_mean_time = (datetime.now().timestamp() - model_mean_time) / 1.0,
-        action = action
+        model_mean_time = float(model_mean_time - last_time),
+        policy_mean_time = float(datetime.now().timestamp() - model_mean_time),
+        action = np.asarray(action)
     )
 
     while not done:
@@ -238,7 +238,7 @@ def run_episode(
         obs, done, info = env.step(action)
         step += 1
         print(f"after pos {env.position}")
-        model_mean_time = (datetime.now().timestamp() - last_time) / 1.0
+        model_mean_time = datetime.now().timestamp() 
 
 
         if render:
@@ -249,11 +249,11 @@ def run_episode(
         if not done:
             action = policy.act(obs, env.position)
 
-        policy_mean_time = (datetime.now().timestamp() - model_mean_time) / 1.0
+        policy_mean_time = datetime.now().timestamp() 
         logger.write(
             run = map_idx, step = step,
             mse = info["mse"],
-            distance = info["distance"],
+            distance = np.asarray(info["distance"], dtype=np.float32),
             budget = info["budget"],
             iou = info["iou"],
             obs_map = obs["obs_map"],
@@ -261,14 +261,14 @@ def run_episode(
             predicted_mean = obs["predicted_mean"],
             predicted_uncertainty = obs["predicted_uncertainty"],
             ground_truth = env.ground_truth,
-            position = env.position,
+            position = np.asarray(env.position),
             policy_name = policy_name,
             map_idx = map_idx,
             dataset_name = dataset_name,
             model_name = model_name,
-            model_mean_time = model_mean_time,
-            policy_mean_time = policy_mean_time,
-            action = action
+            model_mean_time = float(model_mean_time - last_time),
+            policy_mean_time = float(policy_mean_time - model_mean_time),
+            action = np.asarray(action)
         )
 
     return {
@@ -296,7 +296,7 @@ def main() -> None:
     )
     model_names_req = (
         [m.strip() for m in args.models.split(",")]
-        if args.models else ["gaussian_process", "ensemble", "myopic", "edl", "mcdropout"] 
+        if args.models else ["ensemble", "myopic", "edl", "mcdropout"] 
     )
 
     unknown_p = set(policy_names) - set(all_policy_names)
@@ -375,7 +375,7 @@ def main() -> None:
     logger.create_parameter("Maps", map_indices)
 
     logger.create_metric("mse", float, "Mean squared error of nodes", "nodes")
-    logger.create_metric("distance", float, "Distance traveled by each agent", "meters")
+    logger.create_metric("distance", np.ndarray, "Distance traveled by each agent", "meters")
     logger.create_metric("budget", float, "Remaining budget", "units")
     logger.create_metric("iou", float, "Intersection over Union", "proportion")
     logger.create_metric("obs_map", np.ndarray, "Observation map", "observations")
@@ -398,9 +398,9 @@ def main() -> None:
             if ext_maps is not None:
                 _inject_dataset(env, ext_maps)
             active_catalogue = {**POLICY_CATALOGUE}
+            active_catalogue["mcts"] = lambda: _make_mcts(budget=env.budget)
             for policy_name in policy_names:
                 policy = active_catalogue[policy_name]()
-
                 print(f"┌─ model={model_name}  policy={policy_name}")
 
                 for map_idx in map_indices:
