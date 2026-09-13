@@ -35,6 +35,8 @@ class MaxGreedyMiopic(Policy):
         model_value: np.ndarray = obs["predicted_mean"]
         uncertainty: np.ndarray = obs["predicted_uncertainty"]
         mask: np.ndarray = obs["obs_mask"]
+        mask[:8, :] = mask[-8:, :] = 1
+        mask[:, :8] = mask[:, -8:] = 1
         
         H, W = model_value.shape
         destinations = []

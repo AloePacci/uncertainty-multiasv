@@ -111,6 +111,8 @@ class OrienteeringPolicy(Policy):
         """
         uncertainty: np.ndarray = obs["predicted_uncertainty"]
         obs_mask = obs["obs_mask"]
+        obs_mask[:8, :] = obs_mask[-8:, :] = 1
+        obs_mask[:, :8] = obs_mask[:, -8:] = 1
 
         destinations = []
         for index, pos in enumerate(positions):

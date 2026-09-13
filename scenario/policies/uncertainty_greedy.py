@@ -33,6 +33,8 @@ class MaxUncertaintyPolicy(Policy):
             ) -> tuple[tuple[int, int],...]:
         uncertainty: np.ndarray = obs["predicted_uncertainty"]
         mask: np.ndarray = obs["obs_mask"]
+        mask[:8, :] = mask[-8:, :] = 1
+        mask[:, :8] = mask[:, -8:] = 1
         
         H, W = uncertainty.shape
         destinations = []

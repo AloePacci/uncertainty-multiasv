@@ -139,6 +139,8 @@ class MAMCTSPolicy(Policy):
         """
         uncertainty: np.ndarray = obs["predicted_uncertainty"]
         mask: np.ndarray = obs["obs_mask"]
+        mask[:8, :] = mask[-8:, :] = 1
+        mask[:, :8] = mask[:, -8:] = 1
         start_time = datetime.now().timestamp()
 
         # Information map: uncertain AND unobserved cells are most valuable.

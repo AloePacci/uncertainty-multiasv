@@ -47,7 +47,6 @@ ROOT = Path(__file__).parent
 sys.path.insert(0, str(ROOT))
 
 from extended_scenario import ExtendedScenario
-from experiment_logger import ExperimentLogger
 from policies import (
     EpsilonGreedy,
     MaxGreedyMiopic,
@@ -61,7 +60,7 @@ from models.MC_ensemble_model import EnsembleModel
 from models.myopic_model import MyopicModel
 from models.EDL_model import EDLModel
 from models.MC_dropout_model import MCDropoutModel
-
+from sylegendarium import Legendarium
 from datetime import datetime
 
 # ── Policy catalogue ──────────────────────────────────────────────────────────
@@ -81,10 +80,10 @@ def _make_orienteering() -> OrienteeringPolicy:
 def _make_mcts(budget: float) -> MAMCTSPolicy:
     return MAMCTSPolicy(
         budget=budget,
-        depth=50,
+        depth=20,
         min_resolution=1,
         max_resolution=4,
-        n_simulations=2000,
+        n_simulations=200,
         anneal_radius=1,
         control_horizon=0,
         reuse_tree=True,
@@ -95,10 +94,10 @@ def _make_mcts(budget: float) -> MAMCTSPolicy:
 
 
 POLICY_CATALOGUE: dict[str, callable] = {
-    # "myopic_greedy":      _make_myopic_greedy,
-    # "uncertainty_greedy": _make_uncertainty_greedy,
-    # "epsilon_greedy":     _make_epsilon_greedy,
-    # "orienteering":       _make_orienteering,
+    "myopic_greedy":      _make_myopic_greedy,
+    "uncertainty_greedy": _make_uncertainty_greedy,
+    "epsilon_greedy":     _make_epsilon_greedy,
+    "orienteering":       _make_orienteering,
     "mcts":                _make_mcts
 }
 
@@ -195,7 +194,7 @@ def _bootstrap_obs(env: ExtendedScenario) -> dict:
 def run_episode(
     env: ExtendedScenario,
     policy,
-    logger: ExperimentLogger,
+    logger: Legendarium,
     map_idx: int,
     policy_name: str,
     model_name: str,
@@ -207,62 +206,70 @@ def run_episode(
     """
     last_time = datetime.now().timestamp()
     policy.reset()
-    logger.new_episode()
-
     gt = env.reset(map_idx=map_idx)
+    model_mean_time = (datetime.now().timestamp() - last_time) / 1.0,
     action = policy.act(_bootstrap_obs(env), env.position)
     done = False
     step = 0
-    logger.log_step(
-            step=step,
-            info={
-                "mse": float("nan"),
-                "distance": [0.0 for _ in range(env.n_agents)],
-                "budget": env.budget,
-                "iou": float("nan"),
-            },
-            obs={
-                "obs_map":               np.zeros((env.H, env.W), dtype=np.float32),
-                "obs_mask":              np.zeros((env.H, env.W), dtype=np.float32),
-                "predicted_mean":        np.zeros((env.H, env.W), dtype=np.float32),
-                "predicted_uncertainty": np.ones( (env.H, env.W), dtype=np.float32),
-            },
-            ground_truth=env.ground_truth,
-            position=env.position,
-            policy_name=policy_name,
-            map_idx=map_idx,
-            dataset_name=dataset_name,
-            model_name=model_name,
-            mean_time=(datetime.now().timestamp() - last_time) / 1.0
-        )
+    logger.write(
+        run = map_idx, step = step,
+        mse = float("nan"),
+        distance = [0.0 for _ in range(env.n_agents)],
+        budget = env.budget,
+        iou = float("nan"),
+        obs_map = np.zeros((env.H, env.W), dtype=np.float32),
+        obs_mask = np.zeros((env.H, env.W), dtype=np.float32),
+        predicted_mean = np.zeros((env.H, env.W), dtype=np.float32),
+        predicted_uncertainty = np.ones((env.H, env.W), dtype=np.float32),
+        ground_truth = env.ground_truth,
+        position = env.position,
+        policy_name = policy_name,
+        map_idx = map_idx,
+        dataset_name = dataset_name,
+        model_name = model_name,
+        model_mean_time = model_mean_time,
+        policy_mean_time = (datetime.now().timestamp() - model_mean_time) / 1.0,
+        action = action
+    )
+
     while not done:
+        last_time = datetime.now().timestamp()
         print(f"current pos {env.position}")
         obs, done, info = env.step(action)
         step += 1
         print(f"after pos {env.position}")
+        model_mean_time = (datetime.now().timestamp() - last_time) / 1.0
 
-
-        logger.log_step(
-            step=step,
-            info=info,
-            obs=obs,
-            ground_truth=env.ground_truth,
-            position=env.position,
-            policy_name=policy_name,
-            map_idx=map_idx,
-            dataset_name=dataset_name,
-            model_name=model_name,
-            mean_time=(datetime.now().timestamp() - last_time) / 1.0
-        )
 
         if render:
             env.render()
             plt.pause(0.02)
 
+        last_time = datetime.now().timestamp()
         if not done:
             action = policy.act(obs, env.position)
-        last_time = datetime.now().timestamp()
-        # print(f"Step {step}  pos={env.position}  dist={info['distance']}  rmse={info['mse']**0.5}  cov={float(env.obs_mask.mean())*100}%  iou={info['iou']}")
+
+        policy_mean_time = (datetime.now().timestamp() - model_mean_time) / 1.0
+        logger.write(
+            run = map_idx, step = step,
+            mse = info["mse"],
+            distance = info["distance"],
+            budget = info["budget"],
+            iou = info["iou"],
+            obs_map = obs["obs_map"],
+            obs_mask = obs["obs_mask"],
+            predicted_mean = obs["predicted_mean"],
+            predicted_uncertainty = obs["predicted_uncertainty"],
+            ground_truth = env.ground_truth,
+            position = env.position,
+            policy_name = policy_name,
+            map_idx = map_idx,
+            dataset_name = dataset_name,
+            model_name = model_name,
+            model_mean_time = model_mean_time,
+            policy_mean_time = policy_mean_time,
+            action = action
+        )
 
     return {
         "steps":    step,
@@ -317,9 +324,9 @@ def main() -> None:
         print(f"Loading EnsembleModel from {args.weights/'dataset_POINTWISE_Ensemble.pt'} …")
         model_instances["ensemble"] = _make_ensemble(args.weights/'dataset_POINTWISE_Ensemble.pt')
 
-    if "myopic" in model_names_req:
-        print("Loading MyopicModel …")
-        model_instances["myopic"] = _make_myopic()
+    # if "myopic" in model_names_req:
+    #     print("Loading MyopicModel …")
+    #     model_instances["myopic"] = _make_myopic()
 
     if "edl" in model_names_req:
         print("Loading EDLModel …")
@@ -353,7 +360,7 @@ def main() -> None:
         dataset_name = Path(cfg).stem
 
     map_indices = list(range(args.map_start, args.map_start + args.n_maps))
-    logger = ExperimentLogger()
+    logger = Legendarium(f"uncertainty_multiasv", "uncertainty multiasv from 12/09/2026", "experiments")
 
     print(f"\nPolicies : {policy_names}")
     print(f"Models   : {list(model_instances)}")
@@ -363,60 +370,79 @@ def main() -> None:
     total = len(model_instances) * len(policy_names) * args.n_maps
     done_count = 0
 
-    # ── Experiment loop ────────────────────────────────────────────────────
-    for model_name, model in model_instances.items():
-        env = ExtendedScenario(cfg, model=model, budget=args.budget)
-        if ext_maps is not None:
-            _inject_dataset(env, ext_maps)
-        active_catalogue = {**POLICY_CATALOGUE, "mcts": lambda: _make_mcts(env.budget)}
-        for policy_name in policy_names:
-            policy = active_catalogue[policy_name]()
+    logger.create_parameter("Policies", policy_names)
+    logger.create_parameter("Models", list(model_instances))
+    logger.create_parameter("Maps", map_indices)
 
-            print(f"┌─ model={model_name}  policy={policy_name}")
+    logger.create_metric("mse", float, "Mean squared error of nodes", "nodes")
+    logger.create_metric("distance", float, "Distance traveled by each agent", "meters")
+    logger.create_metric("budget", float, "Remaining budget", "units")
+    logger.create_metric("iou", float, "Intersection over Union", "proportion")
+    logger.create_metric("obs_map", np.ndarray, "Observation map", "observations")
+    logger.create_metric("obs_mask", np.ndarray, "Observation mask", "mask")
+    logger.create_metric("predicted_mean", np.ndarray, "Predicted mean map", "predictions")
+    logger.create_metric("predicted_uncertainty", np.ndarray, "Predicted uncertainty map", "uncertainty")
+    logger.create_metric("ground_truth", np.ndarray, "Ground truth map", "ground_truth")
+    logger.create_metric("position", np.ndarray, "Current agent positions", "positions")
+    logger.create_metric("policy_name", str, "Policy name", "policy")
+    logger.create_metric("map_idx", int, "Map index", "map_index")
+    logger.create_metric("dataset_name", str, "Dataset name", "dataset")
+    logger.create_metric("model_name", str, "Model name", "model")
+    logger.create_metric("model_mean_time", float, "Mean time per step", "seconds")
+    logger.create_metric("policy_mean_time", float, "Mean time per step", "seconds")
+    logger.create_metric("action", np.ndarray, "action taken by vehicles", "node")
+    with logger:
+        # ── Experiment loop ────────────────────────────────────────────────────
+        for model_name, model in model_instances.items():
+            env = ExtendedScenario(cfg, model=model, budget=args.budget)
+            if ext_maps is not None:
+                _inject_dataset(env, ext_maps)
+            active_catalogue = {**POLICY_CATALOGUE}
+            for policy_name in policy_names:
+                policy = active_catalogue[policy_name]()
 
-            for map_idx in map_indices:
-                summary = run_episode(
-                    env=env,
-                    policy=policy,
-                    logger=logger,
-                    map_idx=map_idx,
-                    policy_name=policy_name,
-                    model_name=model_name,
-                    dataset_name=dataset_name,
-                    render=args.render,
-                )
-                done_count += 1
-                print(
-                    f"│  map {map_idx}  "
-                    f"steps={summary['steps']}  "
-                    f"dist={summary['distance']}  "
-                    f"rmse={summary['rmse']}  "
-                    f"cov={summary['coverage']}%  "
-                    f"iou={summary['iou']}  "
-                    f"[{done_count}/{total}]"
-                )
+                print(f"┌─ model={model_name}  policy={policy_name}")
 
-            print(f"└─ done\n")
+                for map_idx in map_indices:
+                    summary = run_episode(
+                        env=env,
+                        policy=policy,
+                        logger=logger,
+                        map_idx=map_idx,
+                        policy_name=policy_name,
+                        model_name=model_name,
+                        dataset_name=dataset_name,
+                        render=args.render,
+                    )
+                    done_count += 1
+                    print(
+                        f"│  map {map_idx}  "
+                        f"steps={summary['steps']}  "
+                        f"dist={summary['distance']}  "
+                        f"rmse={summary['rmse']}  "
+                        f"cov={summary['coverage']}%  "
+                        f"iou={summary['iou']}  "
+                        f"[{done_count}/{total}]"
+                    )
+
+                print(f"└─ done\n")
 
     # ── Save results ───────────────────────────────────────────────────────
-    df = logger.to_dataframe()
-    saved = logger.save(args.output)
 
     print("─" * 60)
-    print(f"Total rows recorded : {len(df)}")
-    print(f"Results saved to    : {saved}")
+    print(f"Total rows recorded : {logger.len()}")
     print("─" * 60)
 
     # Quick per-(model, policy) summary
     summary = (
-        df.groupby(["model_name", "policy"])
+        logger.metrics.groupby(["model_name", "policy"])
         .agg(
             episodes=("experiment_id", "nunique"),
             mean_rmse=("rmse", "mean"),
             final_rmse=("rmse", lambda s: s.groupby(
-                df.loc[s.index, "experiment_id"]).last().mean()),
+                logger.metrics.loc[s.index, "experiment_id"]).last().mean()),
             mean_coverage=("coverage", lambda s: s.groupby(
-                df.loc[s.index, "experiment_id"]).last().mean()),
+                logger.metrics.loc[s.index, "experiment_id"]).last().mean()),
             mean_iou=("iou", "mean"),
         )
         .reset_index()

@@ -42,6 +42,8 @@ class EpsilonGreedy(Policy):
         uncertainty: np.ndarray = obs["predicted_uncertainty"]
         value : np.ndarray = obs["predicted_mean"]
         obs_mask: np.ndarray    = obs["obs_mask"]
+        obs_mask[:8, :] = obs_mask[-8:, :] = 1
+        obs_mask[:, :8] = obs_mask[:, -8:] = 1
         H, W = uncertainty.shape
         destinations = []
         # Compute current epsilon based on decay schedule
