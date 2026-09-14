@@ -5,3 +5,5 @@
 *.csv
 *.png
 *.svg
+*.metrics.tar
+*.meta.yaml

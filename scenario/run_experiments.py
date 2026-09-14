@@ -60,7 +60,7 @@ from models.MC_ensemble_model import EnsembleModel
 from models.myopic_model import MyopicModel
 from models.EDL_model import EDLModel
 from models.MC_dropout_model import MCDropoutModel
-from sylegendarium import Legendarium
+from sylegendarium import Legendarium, load_experiment_pd
 from datetime import datetime
 
 # ── Policy catalogue ──────────────────────────────────────────────────────────
@@ -433,16 +433,18 @@ def main() -> None:
     print(f"Total rows recorded : {logger.len()}")
     print("─" * 60)
 
+    experiment_df = load_experiment_pd(logger._exp_name ,logger._path)
+
     # Quick per-(model, policy) summary
     summary = (
-        logger.metrics.groupby(["model_name", "policy"])
+        experiment_df.metrics.groupby(["model_name", "policy_name"])
         .agg(
             episodes=("experiment_id", "nunique"),
-            mean_rmse=("rmse", "mean"),
-            final_rmse=("rmse", lambda s: s.groupby(
-                logger.metrics.loc[s.index, "experiment_id"]).last().mean()),
+            mean_rmse=("mse", "mean"),
+            final_rmse=("mse", lambda s: s.groupby(
+                experiment_df.loc[s.index, "experiment_id"]).last().mean()),
             mean_coverage=("coverage", lambda s: s.groupby(
-                logger.metrics.loc[s.index, "experiment_id"]).last().mean()),
+                experiment_df.loc[s.index, "experiment_id"]).last().mean()),
             mean_iou=("iou", "mean"),
         )
         .reset_index()
