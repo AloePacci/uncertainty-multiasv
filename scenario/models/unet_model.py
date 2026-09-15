@@ -136,6 +136,8 @@ class UNet(nn.Module):
             raise ValueError("kernel_size must be odd to preserve spatial dimensions.")
         if depth < 1:
             raise ValueError("depth must be >= 1.")
+        if in_channels %2 != 0:
+            raise ValueError("for this implementation, in_channels must be even (mask + value channels).")
 
         self.depth = depth
 
