@@ -245,7 +245,6 @@ def run_episode(
             env.render()
             plt.pause(0.02)
 
-        last_time = datetime.now().timestamp()
         if not done:
             action = policy.act(obs, env.position)
 
