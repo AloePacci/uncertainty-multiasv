@@ -98,7 +98,7 @@ POLICY_CATALOGUE: dict[str, callable] = {
     "uncertainty_greedy": _make_uncertainty_greedy,
     "epsilon_greedy":     _make_epsilon_greedy,
     "orienteering":       _make_orienteering,
-    "mcts":                _make_mcts
+    # "mcts":                _make_mcts
 }
 
 
