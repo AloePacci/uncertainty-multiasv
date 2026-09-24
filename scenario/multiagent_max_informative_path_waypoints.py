@@ -226,15 +226,17 @@ class MultiagentMaxInformativePathWaypoints(Problem):
         )
         self.info_map: np.ndarray = info_map.astype(float)
         self.N: int = info_map.shape[0]
-        self.max_budget: float | tuple[float, ...] | defaultdict[float] = (
+        self.max_budget: list[float] = (
             [float(max_budget)] * len(initial_position)
             if isinstance(max_budget, (int, float))
-            else max_budget 
+            else [float(b) for b in max_budget]
         )
         self.candidate_fn: CandidateFn | None = candidate_fn
         self.gamma = gamma
         self.anneal_radius: int = max(0, anneal_radius)
-        self.initial_position: tuple[tuple[int, int], ...] = initial_position
+        self.initial_position: list[tuple[int, int]] = [
+            (int(p[0]), int(p[1])) for p in initial_position
+        ]
         self.neg_reward = neg_reward
         # Precalcular el vecindario de cada celda para el radio dado.
         # _anneal_map[(x,y)] es el frozenset de celdas dentro del disco.
@@ -254,6 +256,9 @@ class MultiagentMaxInformativePathWaypoints(Problem):
                     }
                     self._anneal_map[(cx, cy)] = frozenset(nbrs)
 
+        # Rejilla de coordenadas (y, x) para el cálculo vectorizado de utility.
+        self._grid: tuple[np.ndarray, np.ndarray] = np.indices((self.N, self.N))
+
         # Estado interno de la figura matplotlib (render interactivo).
         self._fig: plt.Figure | None = None
         self._ax: plt.Axes | None = None
@@ -269,13 +274,13 @@ class MultiagentMaxInformativePathWaypoints(Problem):
         Returns:
             Diccionario con campos 'position', 'budget' y 'visited'.
         """
-        start = self.initial_position.copy()
+        start = list(self.initial_position)
         return {
             "position": start,
-            "budget":   self.max_budget.copy(),
-            "visited":  frozenset().union(*(self._anneal_map[(pos[0], pos[1])] for pos in start)),
-            "last_position": start.copy(),
-            "priority": agent_priority_heuristic({"budget": self.max_budget.copy()})
+            "budget":   list(self.max_budget),
+            "visited":  frozenset().union(*(self._anneal_map[pos] for pos in start)),
+            "last_position": list(start),
+            "priority": agent_priority_heuristic({"budget": self.max_budget})
         }
 
     # ------------------------------------------------------------------ #
@@ -304,20 +309,36 @@ class MultiagentMaxInformativePathWaypoints(Problem):
         budget = state["budget"][agent]
 
         if self.candidate_fn is not None:
-            return [
+            actions = [
                 dest for dest in self.candidate_fn(state)
                 if dest != pos
                 and _min_path_cost(pos, dest) <= budget
             ]
+        else:
+            # Sin función candidata: todos los destinos alcanzables.
+            actions = [
+                (x, y)
+                for y in range(self.N)
+                for x in range(self.N)
+                if (x, y) != pos
+                and _min_path_cost(pos, (x, y)) <= budget
+            ]
 
-        # Sin función candidata: todos los destinos alcanzables.
-        return [
-            (x, y)
-            for y in range(self.N)
-            for x in range(self.N)
-            if (x, y) != pos
-            and _min_path_cost(pos, (x, y)) <= budget
-        ]
+        if not actions:
+            # Ningún candidato cabe en el presupuesto: pasos unitarios.
+            x, y = pos
+            actions = [
+                (x + dx, y + dy)
+                for dx in (-1, 0, 1)
+                for dy in (-1, 0, 1)
+                if (dx, dy) != (0, 0)
+                and 0 <= x + dx < self.N and 0 <= y + dy < self.N
+                and _min_path_cost(pos, (x + dx, y + dy)) <= budget
+            ]
+
+        # Si el agente no tiene destinos factibles se queda quieto; así no
+        # bloquea el turno del resto de agentes en el árbol.
+        return actions if actions else [pos]
 
     def transition(self, state: dict, action: tuple[int, int]) -> tuple[dict, float]:
         """
@@ -338,15 +359,18 @@ class MultiagentMaxInformativePathWaypoints(Problem):
         path = _shortest_path(state["position"][agent], action)
         visited = state["visited"]
         total_reward = 0.0
-        last_position = state["position"].copy()
+        last_position = list(state["last_position"])
+        last_position[agent] = state["position"][agent]
 
+        new_cells: set[tuple[int, int]] = set()
         for pos in path:
             if pos not in visited:
                 for nbr in self._anneal_map[pos]:
-                    if nbr not in visited:
+                    if nbr not in visited and nbr not in new_cells:
                         nx, ny = nbr
                         total_reward += float(self.info_map[ny, nx]) - np.abs(self.neg_reward)
-                        visited = visited | frozenset({nbr})
+                        new_cells.add(nbr)
+        visited = visited | new_cells
 
         cost = _min_path_cost(state["position"][agent], action)
         new_budget = list(state["budget"])
@@ -354,7 +378,7 @@ class MultiagentMaxInformativePathWaypoints(Problem):
         if len(state["priority"]) > 1:
             priority = state["priority"][1:]
         else:
-            priority = agent_priority_heuristic(state)
+            priority = agent_priority_heuristic({"budget": new_budget})
         new_position = list(state["position"])
         new_position[agent] = action
 
@@ -382,26 +406,34 @@ class MultiagentMaxInformativePathWaypoints(Problem):
         path = _shortest_path(state["position"][agent], action)
         visited = state["visited"]
         total = 0.0
+        new_cells: set[tuple[int, int]] = set()
         for pos in path:
             if pos not in visited:
                 for nbr in self._anneal_map[pos]:
-                    if nbr not in visited:
+                    if nbr not in visited and nbr not in new_cells:
                         nx, ny = nbr
-                        total += float(self.info_map[ny, nx]) 
-                        visited = visited | frozenset({nbr})
+                        total += float(self.info_map[ny, nx])
+                        new_cells.add(nbr)
         return total - np.abs(self.neg_reward)
 
     def is_terminal(self, state: dict) -> bool:
         """
-        El estado es terminal cuando el presupuesto no cubre el paso mínimo.
+        El estado es terminal cuando, al cerrar una ronda (todos los agentes
+        han movido), algún agente no cubre el paso mínimo. Igual que en el
+        entorno, el episodio no acaba a mitad de una acción conjunta.
 
         Args:
             state: Estado a evaluar.
 
         Returns:
-            True si budget < 1.0.
+            True si es inicio de ronda y algún budget < 1.0.
         """
+        return self.is_action_node(state) and self._budget_exhausted(state)
+
+    def _budget_exhausted(self, state: dict) -> bool:
+        """True si algún agente no cubre el paso mínimo (el episodio acaba en esta ronda)."""
         return any(budget < _MIN_COST for budget in state["budget"])
+
     def is_action_node(self, state: dict) -> bool:
         """
         un nodo es de acción si no hay agentes que aún no hayan seleccionado acción
@@ -411,20 +443,21 @@ class MultiagentMaxInformativePathWaypoints(Problem):
         """
         Cota superior optimista de la información adicional colectable.
 
-        Se calcula como la suma del valor de las celdas dentro de un radio igual al presupuesto restante
+        Se calcula como la suma del valor de las celdas no visitadas dentro
+        de la unión de los discos de cada agente, con radio igual a su
+        presupuesto restante. Si algún agente ya no tiene presupuesto el
+        episodio acaba en esta ronda y no se estima nada más por recoger.
         """
-        agent = state["priority"][0]  # agente con mayor prioridad
-        x, y = state["position"][agent]
-        budget = state["budget"][agent]
-        max_distance = int(math.ceil(budget))
-        total = 0.0
-        for dy in range(-max_distance, max_distance + 1):
-            for dx in range(-max_distance, max_distance + 1):
-                nx, ny = x + dx, y + dy
-                if 0 <= nx < self.N and 0 <= ny < self.N:
-                    distance = math.sqrt(dx**2 + dy**2)
-                    if distance <= budget and (nx, ny) not in state["visited"]:
-                        total += float(self.info_map[ny, nx])
+        if self._budget_exhausted(state):
+            return 0.0
+        ys, xs = self._grid
+        reach = np.zeros((self.N, self.N), dtype=bool)
+        for (x, y), budget in zip(state["position"], state["budget"]):
+            reach |= (xs - x) ** 2 + (ys - y) ** 2 <= budget * budget
+        total = float(self.info_map[reach].sum())
+        for vx, vy in state["visited"]:
+            if reach[vy, vx]:
+                total -= float(self.info_map[vy, vx])
         return total
     
     def upper_bound(self, state: dict, action: tuple[int, int]) -> float:
@@ -448,11 +481,14 @@ class MultiagentMaxInformativePathWaypoints(Problem):
         next_visited = state["visited"] | frozenset(path)
         new_budget = list(state["budget"])
         new_budget[agent] -= cost
+        new_position = list(state["position"])
+        new_position[agent] = action
         next_state = {
-            "position": state["position"],
+            "position": new_position,
             "budget":   new_budget,
             "visited":  next_visited,
-            "last_position" : state["position"]
+            "last_position": state["position"],
+            "priority": state["priority"][1:] or agent_priority_heuristic({"budget": new_budget}),
         }
         return immediate + self.gamma * self.utility(next_state)
 
@@ -627,8 +663,7 @@ class MultiagentMaxInformativePathWaypoints(Problem):
         )
 
         # ── Overlay azul sobre celdas visitadas ───────────────────────── #
-        agent = state["priority"][0]  # agente con mayor prioridad
-        for vx, vy in state["visited"][agent]:
+        for vx, vy in state["visited"]:
             ax.add_patch(
                 patches.Rectangle(
                     (vx - 0.5, vy - 0.5), 1.0, 1.0,
@@ -672,7 +707,7 @@ class MultiagentMaxInformativePathWaypoints(Problem):
 
         # ── Decoración ───────────────────────────────────────────────── #
         ax.set_title(
-            f"Budget: {state['budget'][agent]:.2f}  |  Visitadas: {len(state['visited'][agent])}",
+            f"Budget: {state['budget'][agent]:.2f}  |  Visitadas: {len(state['visited'])}",
             fontsize=11,
         )
         ax.set_xlim(-0.5, self.N - 0.5)

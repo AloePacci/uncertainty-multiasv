@@ -33,7 +33,7 @@ from algorithms.multiagent_mcts import MAMCTS
 sys.path.append(str(Path(__file__).parent.parent))  # allow imports from scenario/
 from multiagent_max_informative_path_waypoints import (
     MultiagentMaxInformativePathWaypoints,
-    _ma_min_path_cost,
+    agent_priority_heuristic,
 )
 from scipy.ndimage import binary_dilation
 from collections import defaultdict
@@ -104,7 +104,8 @@ class MAMCTSPolicy(Policy):
         self._nagents = int(nagents)
 
         # Episode state
-        self._remaining_budget = self._budget
+        self._remaining_budget: list[float] | None = None
+        self._last_position: list[tuple[int, int]] | None = None   # scenario (x, y)
         self._problem: MultiagentMaxInformativePathWaypoints | None = None
         self._mcts: MAMCTS | None = None
         self._last_uncertainty: np.ndarray | None = None
@@ -114,7 +115,8 @@ class MAMCTSPolicy(Policy):
     # ------------------------------------------------------------------ #
 
     def reset(self) -> None:
-        self._remaining_budget = self._budget
+        self._remaining_budget = None
+        self._last_position = None
         self._problem = None
         self._mcts = None
         self._last_uncertainty = None
@@ -138,7 +140,9 @@ class MAMCTSPolicy(Policy):
         ((row, col), ...) — next waypoint list.
         """
         uncertainty: np.ndarray = obs["predicted_uncertainty"]
-        mask: np.ndarray = obs["obs_mask"]
+        # Copy: obs["obs_mask"] may be the environment's own array.
+        mask: np.ndarray = obs["obs_mask"].copy()
+        # Borders carry no information: treat them as already visited.
         mask[:8, :] = mask[-8:, :] = 1
         mask[:, :8] = mask[:, -8:] = 1
         start_time = datetime.now().timestamp()
@@ -159,37 +163,58 @@ class MAMCTSPolicy(Policy):
         if info_max > info_min:
             info_map = (info_map - info_min) / (info_max - info_min)
 
+        # Policy (row, col) → scenario (x=col, y=row).
+        scenario_pos = [(int(c), int(r)) for r, c in position]
+
+        # Remaining budget: the environment charges the straight-line
+        # Euclidean distance actually travelled by each agent.
+        if self._remaining_budget is None:
+            self._remaining_budget = [self._budget] * len(scenario_pos)
+        elif self._last_position is not None:
+            for i, (p0, p1) in enumerate(zip(self._last_position, scenario_pos)):
+                step = math.hypot(p1[0] - p0[0], p1[1] - p0[1])
+                self._remaining_budget[i] = max(0.0, self._remaining_budget[i] - step)
+        last_position = self._last_position or scenario_pos
+        self._last_position = scenario_pos
+
         # Rebuild planner when the uncertainty map changed significantly.
         if self._uncertainty_changed(uncertainty):
-            self._build_planner(info_map, position)
+            self._build_planner(info_map, scenario_pos)
             self._last_uncertainty = uncertainty.copy()
 
-        # Current MCTS state derived from the real environment.
-        visited = _mask_to_visited(mask)
-        state = self._mcts.problem.initial_state()
+        # Current MAMCTS state derived from the real environment.
+        budget = list(self._remaining_budget)
+        state = {
+            "position": scenario_pos,
+            "budget": budget,
+            "visited": _mask_to_visited(mask),
+            "last_position": list(last_position),
+            "priority": agent_priority_heuristic({"budget": budget}),
+        }
 
-        # Query MCTS.
+        # Query MAMCTS.
         action, _ = self._mcts.select_action(state)  # type: ignore[union-attr]
         if action is None:
+            # Terminal for the planner (some agent has < 1 px left): take one
+            # greedy unit step per agent so the episode ends with minimal
+            # budget overshoot.
+            H, W = info_map.shape
             action = []
-            aux_info_map = np.copy(info_map)
-            for i in range(len(position)):
-                idx = int(np.argmax(aux_info_map))
-                r, c = np.unravel_index(idx, info_map.shape)
-                action.append((r, c))
-                aux_info_map[r, c] = 0.0
+            for r, c in position:
+                r, c = int(r), int(c)
+                neighbours = [
+                    (r + dr, c + dc)
+                    for dr in (-1, 0, 1) for dc in (-1, 0, 1)
+                    if (dr, dc) != (0, 0) and 0 <= r + dr < H and 0 <= c + dc < W
+                ]
+                action.append(max(neighbours, key=lambda rc: info_map[rc]))
             return tuple(action)
 
-        # Deduct movement cost from remaining budget.
-        cost = _ma_min_path_cost(position, action)
-        self._remaining_budget = []
-        for i in range(len(cost)):
-            self._remaining_budget.append(max(0.0, state["budget"][i] - cost[i]))
         end_time = datetime.now().timestamp()
-        print(f"Selected action: {action} \n from position {position} \n with remaining budget {self._remaining_budget} \n time taken: {end_time - start_time} seconds \n  ------------------------------------------------------")
+        print(f"Selected action: {action} \n from position {scenario_pos} \n with remaining budget {self._remaining_budget} \n time taken: {end_time - start_time} seconds \n  ------------------------------------------------------")
 
         # Scenario (x=col, y=row) → policy (row, col).
-        return action
+        return tuple((int(ay), int(ax)) for ax, ay in action)
 
     # ------------------------------------------------------------------ #
     # Internal helpers                                                     #
@@ -212,7 +237,7 @@ class MAMCTSPolicy(Policy):
         """Construct a fresh problem and MCTS planner for the current info map."""
         problem = MultiagentMaxInformativePathWaypoints(
             info_map=info_map,
-            max_budget=self._remaining_budget,
+            max_budget=list(self._remaining_budget),
             candidate_fn=None,          # assigned after construction
             initial_position=initial_position,
             gamma=self._gamma,

@@ -91,7 +91,7 @@ class MAMCTSNode:
         action_taken: Acción que llevó desde el padre a este nodo.
         children:     Mapa acción → nodo hijo ya creado en el árbol.
         N:            Mapa acción → número de visitas N(s, a).
-        Q:            Mapa acción → media incremental de retornos Q(s, a).
+        Q:            Mapa acción → suma de retornos; la media es Q(s, a) / N(s, a).
         N_total:      Número total de visitas al nodo, Σ_a N(s, a).
         expanded:     True si el nodo ya fue expandido (ha tenido al menos
                       un rollout y las siguientes visitas usarán UCB1).
@@ -252,26 +252,39 @@ class MAMCTS:
         for _ in range(self.n_simulations):
             self._simulate(root, self.depth)
 
-        joint_actions=[]
-        joint_values=[]
         # ── Guardar raíz de decisión ANTES de avanzar ─────────────────── #
         self._decision_root = root
-        node = root
-        for agent_index in range(len(state["position"])):
-            # ── Selección final: arg max_a Q(s, a) ────────────────────────── #
-            # IMPORTANTE: usar cached_actions cuando estén disponibles.
-            actions = node.cached_actions if node.cached_actions is not None \
-                else self.problem.get_actions(node.state)
-            if not actions:
-                self._decision_root = root
-                self._root = root
-                return (None, 0.0)
-            best_action = max(actions, key=lambda a: node.Q.get(a, float("-inf"))/ (node.N.get(a, 0) or 1))
-            best_value = node.Q.get(best_action, 0.0)
-            
-            joint_actions.append(best_action)
-            joint_values.append(best_value)
-            node = node.children.get(best_action)
+
+        # ── Selección final: un nivel del árbol por agente ────────────── #
+        # Cada nivel corresponde al agente state["priority"][0], así que la
+        # acción se coloca en su índice (no en el orden de los niveles).
+        n_agents = len(state["position"])
+        joint_actions: list[Any] = [None] * n_agents
+        joint_values: list[float] = [0.0] * n_agents
+        node: Optional[MAMCTSNode] = root
+        current = state
+        for _ in range(n_agents):
+            agent = current["priority"][0]
+            if node is not None and node.N:
+                # arg max_a Q(s, a) / N(s, a) sobre las acciones ya exploradas.
+                best_action = max(node.N, key=lambda a: node.Q[a] / node.N[a])
+                best_value = node.Q[best_action] / node.N[best_action]
+                next_node = node.children.get(best_action)
+            else:
+                # Nivel sin estadísticas: greedy sobre la recompensa inmediata.
+                actions = self.problem.get_actions(current)
+                if not actions:
+                    self._root = root
+                    return (None, 0.0)
+                best_action = max(actions, key=lambda a: self.problem.reward(current, a))
+                best_value = 0.0
+                next_node = None
+
+            joint_actions[agent] = best_action
+            joint_values[agent] = best_value
+            current = next_node.state if next_node is not None \
+                else self.problem.transition(current, best_action)[0]
+            node = next_node
 
 
 
@@ -291,8 +304,9 @@ class MAMCTS:
         #         node = next_node
 
         # ── Avanzar la raíz para la próxima replanificación ───────────── #
-        self._root = node if node is not None else root
-        self._root.parent = None
+        self._root = node
+        if self._root is not None:
+            self._root.parent = None
 
         return joint_actions, joint_values
 
@@ -343,7 +357,7 @@ class MAMCTS:
         future = self._simulate(child, depth - 1)
         q = reward + self.gamma * future
 
-        # ── Retropropagación: media incremental Q ← Q + (q − Q) / N ──── #
+        # ── Retropropagación: Q acumula la suma de retornos (media = Q/N) #
         n = node.N.get(action, 0) + 1
         node.N[action] = n
         node.N_total += 1
