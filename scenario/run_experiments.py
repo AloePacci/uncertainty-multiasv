@@ -94,11 +94,11 @@ def _make_mcts(budget: float) -> MAMCTSPolicy:
 
 
 POLICY_CATALOGUE: dict[str, callable] = {
-    "myopic_greedy":      _make_myopic_greedy,
-    "uncertainty_greedy": _make_uncertainty_greedy,
-    "epsilon_greedy":     _make_epsilon_greedy,
-    "orienteering":       _make_orienteering,
-    # "mcts":                _make_mcts
+    # "myopic_greedy":      _make_myopic_greedy,
+    # "uncertainty_greedy": _make_uncertainty_greedy,
+    # "epsilon_greedy":     _make_epsilon_greedy,
+    # "orienteering":       _make_orienteering,
+    "mcts":                _make_mcts
 }
 
 
