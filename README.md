@@ -315,7 +315,3 @@ Each run writes a timestamped log to `experiments/`.
 Open [viewer.ipynb](viewer.ipynb). It loads every log in `experiments/` with `sylegendarium.load_experiments`. From those logs it produces the UCE table, the calibration curves, the RMSE and IoU box plots, the timing tables, the trajectory plots and the framework figure, saving them under `Results/plots/`.
 
 ---
-
-## Acknowledgments
-
-Project PID2024-158365OB-C21 funded by MICIU/AEI/10.13039/501100011033 and by FEDER, UE, and Universidad de Sevilla, VII Plan Propio de Investigación y Transferencia (2022–2025).
