@@ -1,267 +1,204 @@
-# Uncertainty Estimation for Oil Spill Field Reconstruction
+# Uncertainty-Aware Informative Path Planning for Multi-ASV Oil Spill Monitoring
 
-This repository contains the code and experiments for the paper submitted to , comparing four uncertainty-aware methods for reconstructing scalar density fields from sparse, noisy sensor observations in an oil spill monitoring scenario.
+Code and experiments for the paper *Uncertainty-Aware Informative Path Planning for Multi-ASV Oil Spill Monitoring* by Alejandro Casado-Pérez, Samuel Yanes, Marija Popović, Sergio L. Toral and Daniel Gutiérrez-Reina.
+
+A fleet of four Autonomous Surface Vehicles (ASVs) maps an unknown oil spill from sparse, noisy, pointwise measurements under a distance budget. The ASVs share one deep reconstruction model, which returns the spill field together with its uncertainty, and use the uncertainty map to coordinate where to sample next. The study compares three deep uncertainty quantification methods (Monte Carlo Dropout, Deep Ensembles and Evidential Deep Learning) against a Gaussian Process baseline. Each model runs in closed loop with five planners: Value-Greedy, Uncertainty-Greedy, ε-Greedy, receding-horizon Orienteering and multi-agent Monte Carlo Tree Search.
+
+**Main finding:** calibrated uncertainty is the best signal for guiding a fleet. Evidential Deep Learning (EDL) has the best-calibrated uncertainty, the lowest reconstruction error (mean RMSE 0.001847) and the highest spill IoU (84.9 %), at 3.9 ms per inference. Look-ahead planners amplify the effect of calibration: MCTS gets near-best reconstruction with EDL and the worst of all configurations with Deep Ensembles.
+
+**Framework overview** ([PDF](Results/plots/framework_figure.pdf)): *(a) four ASVs explore an unknown spill; (b) the measured nodes are the only model input; (c) reconstruction μ and (d) uncertainty σ returned by EDL; MCTS uses σ to choose each agent's next waypoint.*
+
+---
 
 ## Table of Contents
 
 1. [Problem Setup](#problem-setup)
-2. [Datasets](#datasets)
-3. [Models](#models)
-4. [Training](#training)
-5. [Evaluation](#evaluation)
+2. [Sensing–Learning–Planning Loop](#sensinglearningplanning-loop)
+3. [Reconstruction Models](#reconstruction-models)
+4. [Planners](#planners)
+5. [Datasets](#datasets)
 6. [Results](#results)
 7. [Repository Structure](#repository-structure)
-8. [Requirements](#requirements)
+8. [Installation](#installation)
+9. [Usage](#usage)
+10. [Acknowledgments](#acknowledgments)
 
 ---
 
 ## Problem Setup
 
-A fleet of mobile sensors (AUV or drone) traverse a region containing an oil spill and collects sparse, noisy observations along their trajectory. The goal is to **reconstruct the full 2D density field** from these partial measurements and, crucially, to **quantify prediction uncertainty** — decomposed into:
+| Element | Value in the code |
+|---|---|
+| Map | 100 × 100 grid. An 8-pixel border is non-navigable (masked out of observations, predictions and planning). |
+| Fleet | N = 4 homogeneous ASVs, starting at `(50,50)`, `(60,50)`, `(50,60)`, `(60,60)` ([scenario_config.yaml](scenario/scenario_config.yaml)). |
+| Field | Static oil-spill concentration f, normalised to [0, 1]. |
+| Sensor | Pointwise contact sensor. Each agent moves in a straight line to its waypoint and measures every cell it crosses, with additive Gaussian noise (`noise_std` in the config). |
+| Budget | D = 300 px of Euclidean distance per vehicle. The episode ends when any vehicle exhausts its budget. |
+| Objective | Minimise the RMSE between f and the reconstruction f̂ at the end of the mission. |
 
-- **Epistemic uncertainty** — model/knowledge uncertainty, reducible with more data.
-- **Aleatoric uncertainty** — irreducible observation noise inherent to the sensor.
+Constraints and assumptions follow the paper: the occupancy map and initial positions are known, localisation is exact, and communication is instantaneous and lossless, so all agents share one model f̂.
 
-Each model receives a 2-channel input `(observation_mask, observed_values)` on a 100×100 grid and outputs a predicted mean field alongside both uncertainty components.
+### Uncertainty decomposition
+
+Every model returns a predictive mean and two standard deviations:
+
+σ²<sub>total</sub>(x) = σ²<sub>ale</sub>(x) (irreducible sensor noise) + σ²<sub>epi</sub>(x) (reducible lack of knowledge)
+
+The environment ([extended_scenario.py](scenario/extended_scenario.py)) gives the policies `predicted_uncertainty = sqrt(σ²_epi + σ²_ale)`, the total predictive standard deviation, masked to the navigable area.
+
+---
+
+## Sensing–Learning–Planning Loop
+
+All planners run inside the same receding-horizon loop ([run_experiments.py](scenario/run_experiments.py)):
+
+1. The agents move to their waypoints and measure along the way (`ObservationScenario.step`).
+2. The reconstruction model is queried on the observation mask and the observed values. It returns the predicted mean and uncertainty maps.
+3. The policy receives the observation dictionary and the agent positions, and returns one waypoint per agent. Only the first step of any longer plan is executed.
+4. The loop repeats until the budget runs out.
+
+Every step logs RMSE (unobserved cells), IoU (threshold τ = 0.05), per-agent distance, all maps, positions, and model and policy wall-clock time with [sylegendarium](https://pypi.org/project/sylegendarium/) into `experiments/`.
+
+---
+
+## Reconstruction Models
+
+All models share the interface used by the scenario:
+
+```python
+out = model.predict({"obs_map": obs_map, "obs_mask": obs_mask})
+# out["predicted_mean"], out["predicted_std_epistemic"], out["predicted_std_aleatoric"]
+```
+
+### Shared U-Net backbone ([unet_model.py](scenario/models/unet_model.py))
+
+- **Input:** `X = [U, V]` ∈ ℝ<sup>2×H×W</sup>. U is the binary observation mask and V holds the sensor readings (zero elsewhere). Encoding the mask explicitly lets the network tell an unobserved cell from a zero reading.
+- **Encoder:** 4 blocks of `(Conv → BN → ReLU) × 2 + MaxPool`, channels 32 → 64 → 128 → 256 → 512.
+- **Bottleneck:** 1024 channels.
+- **Decoder:** transposed convolutions with skip connections.
+- **Head:** 1×1 convolution producing the mean and a variance head (Softplus).
+- **Loss:** heteroscedastic Gaussian NLL, `½ (y − μ)²/σ² + ½ log σ²`. This keeps the predicted variance from collapsing to zero, which is what happens when training with MSE alone.
+
+### Monte Carlo Dropout ([MC_dropout_model.py](scenario/models/MC_dropout_model.py))
+
+Dropout2d with p = 0.2 after each convolutional block, kept active at inference. S = 30 stochastic passes:
+
+- f̂ = mean of the predicted means
+- σ²<sub>epi</sub> = variance of the predicted means
+- σ²<sub>ale</sub> = mean of the predicted variances
+
+### Deep Ensemble ([MC_ensemble_model.py](scenario/models/MC_ensemble_model.py))
+
+M = 5 independently initialised U-Nets (seed + k), each trained with the Gaussian NLL on independently shuffled data. At inference all members run deterministically:
+
+- σ²<sub>epi</sub> = disagreement (variance) between the member means
+- σ²<sub>ale</sub> = mean of the member variances
+
+### Evidential Deep Learning ([EDL_model.py](scenario/models/EDL_model.py))
+
+The U-Net outputs the four Normal-Inverse-Gamma parameters (γ, ν, α, β) per pixel, with ν > 0, α > 1 and β > 0 enforced through Softplus. A single forward pass gives:
+
+| Quantity | Closed form |
+|---|---|
+| f̂ | γ |
+| σ²<sub>ale</sub> | β / (α − 1) |
+| σ²<sub>epi</sub> | β / (ν (α − 1)) |
+
+Loss: Student-t NLL of the marginalised NIG plus the evidence regulariser `λ |f − γ| (2ν + α)`, with λ = 10⁻³ and gradient clipping at max-norm 1.0.
+
+### Gaussian Process baseline ([gaussian_process_model.py](scenario/models/gaussian_process_model.py))
+
+There is no offline training. At every step a GP is refitted on the samples collected so far, with kernel `C · RBF(ℓ) + WhiteKernel(σ_n²)` and `normalize_y=True`. Hyperparameters are fitted by maximising the marginal log-likelihood with L-BFGS (2 restarts in the experiments).
+
+- σ²<sub>epi</sub>: posterior variance. It contracts at sampled locations.
+- σ²<sub>ale</sub>: the fitted noise level, spatially uniform.
+
+The posterior variance depends on where samples were taken, not on their values, so a GP-driven planner degenerates into coverage.
+
+[myopic_model.py](scenario/models/myopic_model.py) also implements an inverse-distance-weighting interpolator, which is not part of the paper's benchmark.
+
+---
+
+## Planners
+
+Policies live in [scenario/policies/](scenario/policies/) and implement `Policy.act(obs, positions) -> waypoints`.
+
+**Multi-agent coordination.** Agents choose one after another within a decision step. Each agent sees the targets already committed by the previous ones (they are marked as visited), so the fleet spreads out without any explicit distance constraint.
+
+| Paper name | Experiment key | Class | Behaviour in the code |
+|---|---|---|---|
+| Value-Greedy | `myopic_greedy` | `MaxGreedyMiopic` | Picks the unobserved cell within 30 px that maximises `predicted_mean × uncertainty`. |
+| Uncertainty-Greedy | `uncertainty_greedy` | `MaxUncertaintyPolicy` | Picks the unobserved cell within 30 px with the highest uncertainty. |
+| ε-Greedy | `epsilon_greedy` | `EpsilonGreedy` | ε decays linearly from 0.1 to 0.01 over 100 steps. Chooses between a random unobserved cell within 30 px and the highest-mean candidate. |
+| RH Orienteering | `orienteering` | `OrienteeringPolicy` | Orienteering problem on a sub-grid of candidate waypoints (step 2 px). Edge reward is the sum of uncertainty along the segment, edge cost is the Euclidean length. Planning horizon 30 px, replans every 5 px. Solved per agent with multi-start greedy construction followed by remove/insert hill-climbing. |
+| MCTS | `mcts` | `MAMCTSPolicy` | Multi-agent UCT ([multiagent_mcts.py](scenario/policies/algorithms/multiagent_mcts.py)) on [multiagent_max_informative_path_waypoints.py](scenario/multiagent_max_informative_path_waypoints.py). Settings: 500 simulations, depth 50, γ = 0.8, c = √2, tree reuse. Each tree level is one agent's action, so a joint action spans N levels, and agents are ordered by remaining budget. Branching is uncertainty-adaptive: the 8-neighbour step shrinks from 4 px to 1 px as local information grows. The reward map is the min-max-normalised uncertainty on unobserved cells. |
+
+`MCTSPolicy` (single-agent MCTS) and the forward-search, branch-and-bound and sparse-sampling planners in [scenario/policies/algorithms/](scenario/policies/algorithms/) are not part of the paper's benchmark. [algorithms.md](scenario/policies/algorithms/algorithms.md) and [scenarios.md](scenario/scenarios.md) document them (in Spanish).
 
 ---
 
 ## Datasets
 
-Three synthetic datasets are generated using a physics-based oil spill particle simulator ([DatasetGeneration.py](DatasetGeneration.py), [ground_truths.py](ground_truths.py)). Each dataset contains **2000 simulations** on a **100×100 grid**, differing only in their **observation (sensor) model**:
+The synthetic oil spills come from a physics-based particle simulator ([ground_truths.py](dataset/ground_truths.py)) with random spill origin, wind and current. Each ground-truth map is Gaussian-smoothed and min-max normalised to [0, 1].
 
-| Dataset | Sensor Model | Avg. Coverage |
-|---|---|---|
-| **CONIC** | Conic field-of-view (60° angle, radius 10 px) | 14.4% |
-| **NADIR** | Nadir downward-looking camera (radius 1 px) | low |
-| **POINTWISE** | Single waypoint measurements | lowest |
+[DatasetGeneration.py](dataset/DatasetGeneration.py) builds 2000 simulations per dataset on a 100 × 100 grid (seed 42). Each simulation is paired with a sparse observation path produced by an observation model from [ObservationModels.py](dataset/ObservationModels.py):
 
-Each sample is stored in a `.npz` file with three arrays:
-- `ground_truth`: (2000, 100, 100) — true spill density field
-- `observed_map`: (2000, 100, 100) — noisy observations (0 where unobserved)
-- `observed_mask`: (2000, 100, 100) — binary mask of observed pixels
-
-**Simulation parameters**: 2000 particles, spill radius 3.0, wind/tide speed 1.0, 50–100 steps per simulation, observation noise σ ∈ [0.01, 0.08].
-
-### Sample Visualisation
-
-The figure below shows six random samples from the CONIC dataset. Each row shows the ground truth density field, the noisy observation map, and the binary observation mask.
-
-![CONIC sample gallery](Datasets/plots/dataset_CONIC_11_sample_gallery.png)
-
-### Observation Coverage Distribution
-
-Coverage varies substantially across simulations — even with the widest sensor (CONIC), large portions of the field remain unobserved, making reconstruction a genuinely ill-posed problem.
-
-![Coverage distribution](Datasets/plots/dataset_CONIC_01_coverage_dist.png)
-
-### Observation vs. Ground Truth
-
-The scatter below shows observed pixel values against their true density. The spread captures sensor noise and illustrates the signal-to-noise conditions that uncertainty models must handle.
-
-![Observed vs GT scatter](Datasets/plots/dataset_CONIC_10_obs_vs_gt_scatter.png)
-
----
-
-## Models
-
-All models share a common interface:
-
-```python
-predictions = model.predict(X)
-# returns dict with keys:
-#   'predicted_mean'           (B, 1, H, W)
-#   'predicted_std_epistemic'  (B, 1, H, W)
-#   'predicted_std_aleatoric'  (B, 1, H, W)
-```
-
-### 1. Monte Carlo Dropout ([MC_dropout_model.py](MC_dropout_model.py))
-
-Standard U-Net with **Dropout2d (p=0.2)** inserted after every ReLU. At inference, dropout remains active and **T=30 stochastic forward passes** are drawn:
-
-- **Epistemic σ** = std of predicted means across T passes
-- **Aleatoric σ** = mean of predicted stds across T passes
-
-Loss: heteroscedastic Gaussian NLL — `0.5 * [(y−μ)²/σ² + log σ²]`
-
-### 2. Deep Ensemble ([MC_ensemble_model.py](MC_ensemble_model.py))
-
-**5 independently trained U-Nets**, each with a distinct random seed and no weight sharing. At inference all members run in deterministic eval mode:
-
-- **Epistemic σ** = std of predicted means across members
-- **Aleatoric σ** = mean of predicted stds across members
-
-Ensembles exploit diversity through different weight initialisation and SGD stochasticity.
-
-### 3. Evidential Deep Learning — EDL ([EDL_model.py](EDL_model.py))
-
-A single U-Net backbone with **four output heads** parametrising a **Normal-Inverse-Gamma (NIG)** distribution `p(μ, σ² | γ, ν, α, β)`:
-
-| Head | Parameter | Constraint | Meaning |
-|---|---|---|---|
-| γ | mean | unconstrained | predicted field value |
-| ν | virtual obs. count | Softplus | epistemic evidence |
-| α | IG shape | Softplus + 1 | aleatoric shape |
-| β | IG scale | Softplus | aleatoric scale |
-
-Uncertainty decomposition:
-- **Aleatoric σ** = √(β / (α − 1))
-- **Epistemic σ** = √(β / (ν · (α − 1)))
-
-Loss: NIG-NLL plus regularisation `λ · |y − γ| · (2ν + α)`, with λ=1e-3 and gradient clipping (max_norm=1.0) to stabilise training.
-
-### 4. Gaussian Process ([gaussian_process_model.py](gaussian_process_model.py))
-
-**No offline training** — a GP is fitted per test sample directly on the observed pixels. Kernel: `C · RBF(ℓ) + WhiteKernel(σ_n)`, optimised by L-BFGS.
-
-- **Epistemic σ** = posterior predictive std of the signal kernel (zero at observation sites)
-- **Aleatoric σ** = √(fitted noise_level) × y_std (spatially uniform)
-
-Provides a strong non-parametric baseline but scales poorly to dense observations.
-
-### U-Net Backbone ([models.py](models.py))
-
-Shared by all deep learning models:
-
-- **Encoder**: 4 blocks of `(Conv→BN→ReLU)×2 + MaxPool(2)`, channels: 32→64→128→256→512
-- **Bottleneck**: 512→1024
-- **Decoder**: 4 transposed-convolution blocks with skip connections
-- **Output heads**: 1×1 convolutions with Softplus activations
-
----
-
-## Training
-
-Training is orchestrated by [train_models.py](train_models.py). The dataset is split **80% / 20%** (seed=42) — the same split is reused at evaluation.
-
-| Hyperparameter | MC Dropout | Ensemble | EDL |
-|---|---|---|---|
-| Epochs | 50 | 50 | 50 |
-| Batch size | 16 | 16 | 16 |
-| Learning rate | 3e-4 | 3e-4 | 5e-4 |
-| Optimizer | Adam | Adam | Adam |
-| Gradient clipping | — | — | max_norm=1.0 |
-| Loss | Gaussian NLL | Gaussian NLL | NIG-NLL + reg |
-
-Ensemble training runs each of the 5 members independently. GP models require no weight training and are fitted at inference time. Trained weights are saved to `Weights/` as `{dataset}_{model}.pt`.
-
-```bash
-python train_models.py     # trains all DL models on all three datasets
-python evaluate_models.py  # runs inference and saves Results/eval_{dataset}.pkl.gz
-python plot_results.py     # generates all figures in Results/plots/
-python dataset_analysis.py # generates exploratory figures in Datasets/plots/
-```
-
----
-
-## Evaluation
-
-Metrics are computed in [metrics.py](metrics.py) on the 20% held-out test set (400 samples per dataset):
-
-| Metric | Measures |
+| Config | Sensor model |
 |---|---|
-| **RMSE** | Reconstruction accuracy |
-| **R²** | Explained variance |
-| **NLL** | Calibration quality (penalises over/under-confidence) |
-| **ECE** | Mean coverage deviation across confidence levels |
-| **UCE** | Uncertainty vs. empirical variance across uncertainty bins |
+| [dataset_config_POINTWISE.yaml](dataset/dataset_config_POINTWISE.yaml) | Pointwise contact sensor along random waypoint paths (used by the paper) |
+| [dataset_config_NADIR.yaml](dataset/dataset_config_NADIR.yaml) | Nadir downward-looking camera |
+| [dataset_config_CONIC.yaml](dataset/dataset_config_CONIC.yaml) | Conic field of view (60°, radius 10 px) |
+
+Each `.npz` stores `ground_truth`, `observed_map` and `observed_mask`, each of shape `(2000, 100, 100)`, plus JSON metadata. The deep models are trained on the POINTWISE dataset with an 80/20 split (seed 42). The planning scenario reads its ground-truth maps from `dataset_path` in [scenario_config.yaml](scenario/scenario_config.yaml).
+
+Datasets (`*.npz`) and weights (`*.pt`) are git-ignored. Generate them locally (see [Usage](#usage)).
 
 ---
 
 ## Results
 
-All result figures are in [Results/plots/](Results/plots/).
+The numbers below are taken from the paper (100 × 100 grid, 4 ASVs, D = 300 px, sensor noise 𝒩(0, 0.1²)).
 
-### Reconstruction Quality — RMSE
+### Uncertainty calibration — UCE (×10³, lower is better)
 
-Box plots of RMSE across all 400 test samples and three datasets. **EDL achieves the best reconstruction** across all sensor models, far ahead of all other methods.
+| Policy | GP | MC Dropout | Ensemble | EDL |
+|---|:-:|:-:|:-:|:-:|
+| Value Greedy | 12.6 (7.8) | 8.5 (2.1) | 14.3 (8.9) | **1.0 (1.7)** |
+| Uncertainty Greedy | 9.4 (4.0) | 8.6 (2.9) | 14.5 (6.6) | **3.9 (7.5)** |
+| ε-Greedy | 11.2 (3.5) | 11.8 (5.8) | 13.4 (8.5) | **1.9 (3.4)** |
+| RH Orienteering | 9.1 (5.2) | 9.3 (2.9) | 30.0 (19.5) | **1.0 (1.2)** |
+| MCTS | 19.4 (8.3) | 10.5 (3.1) | 71.6 (40.0) | **0.7 (0.2)** |
 
-![RMSE boxplot](Results/plots/rmse_boxplot.png)
+EDL is the best-calibrated model under every policy. MC Dropout's calibration barely depends on the planner. The ensemble degrades sharply under the look-ahead planners. Calibration curves: [calibration_by_model_ieee.pdf](Results/plots/calibration_by_model_ieee.pdf).
 
-**RMSE by algorithm and observation model (mean ± std):**
+### Reconstruction (mean over planners)
 
-|           | Conic FOV | Nadir camera | Pointwise sensor |
-|-----------|:---------:|:------------:|:----------------:|
-| **EDL**       | 0.0274 ± 0.0234 | 0.0293 ± 0.0209 | 0.0272 ± 0.0204 |
-| **Ensemble**  | 0.0506 ± 0.0238 | 0.0570 ± 0.0200 | 0.0586 ± 0.0188 |
-| **MC Dropout**| 0.0878 ± 0.0222 | 0.0915 ± 0.0160 | 0.0992 ± 0.0167 |
-| **GP**        | 0.1146 ± 0.0348 | 0.1193 ± 0.0648 | 0.1146 ± 0.0321 |
+| Model | RMSE | IoU (τ = 0.05) | Comment |
+|---|:-:|:-:|---|
+| GP | 0.011060 | 52.75 % | Homoscedastic noise smooths the spill boundary. Value-Greedy can stall on noise-induced local maxima. |
+| MC Dropout | 0.006845 | 51.1 % | High-frequency prediction noise exceeds τ in clean water. |
+| Deep Ensemble | 0.011820 | 73.2 % | Averaging the members suppresses activations outside the spill. |
+| **EDL** | **0.001847** | **84.9 %** | Lowest error, and the least variation across planners. |
 
-### Calibration — Negative Log-Likelihood
+Box plots: [RMSE](Results/normalized_rmse_boxplot.pdf), [MSE](Results/mse_boxplot.pdf), [IoU](Results/iou_boxplot.pdf).
 
-Lower NLL indicates better-calibrated uncertainty. **Ensemble achieves the best NLL**, followed by EDL. MC Dropout shows high variance, suggesting unstable uncertainty estimates.
+### Computation time per decision step
 
-![NLL boxplot](Results/plots/nll_boxplot.png)
+| Model | EDL | Ensemble | MC Dropout | GP |
+|---|:-:|:-:|:-:|:-:|
+| Time | 3.9 ms | 13.0 ms | 101.3 ms | 94.2 s |
 
-**NLL by algorithm and observation model (mean ± std):**
+| Policy | ε-Greedy | Value Greedy | Uncertainty Greedy | Orienteering | MCTS |
+|---|:-:|:-:|:-:|:-:|:-:|
+| Time | 1.1 ms | 1.8 ms | 1.7 ms | 1.29 s | 2.51 s |
 
-|           | Conic FOV | Nadir camera | Pointwise sensor |
-|-----------|:---------:|:------------:|:----------------:|
-| **Ensemble**  | −4.6572 ± 0.5717 | −4.0291 ± 0.4421 | −4.1654 ± 0.3356 |
-| **EDL**       | −1.9935 ± 16.7829 | −2.6260 ± 12.4711 | −3.3552 ± 5.4053 |
-| **MC Dropout**| 1.5204 ± 61.1348 | −2.9536 ± 10.1969 | −3.4230 ± 1.1549 |
-| **GP**        | −0.6332 ± 0.5984 | 2.8468 ± 10.6790 | 2.6945 ± 10.0616 |
+All planners fit within the 20–40 s an ASV needs to reach a waypoint. The GP, refitted at every step, is about 24,000× slower than EDL.
 
-### Calibration Curves
+### Takeaways
 
-Normalized error vs. normalized uncertainty across normalized confidence levels (0.0 to 1.0). A perfectly calibrated model follows the diagonal. **EDL and Ensemble are best calibrated**.
-
-![Calibration curves](Results/plots/calibration_curve.png)
-
-**Mean absolute deviation from the ideal calibration diagonal:**
-
-| Algorithm | Conic FOV | Nadir camera | Pointwise sensor |
-|-----------|:---------:|:------------:|:----------------:|
-| **EDL**       | **0.0380** | **0.0378** | 0.0401 |
-| **Ensemble**  | 0.0502 | 0.0722 | **0.0425** |
-| **MC Dropout**| 0.1254 | 0.1277 | 0.0698 |
-| **GP**        | 0.5281 | 0.6149 | 0.5993 |
-
-### Uncertainty Calibration Error (UCE)
-
-UCE measures whether predicted uncertainty magnitudes are consistent with actual errors. **EDL achieves the lowest UCE** across all sensor models.
-
-![UCE barplot](Results/plots/uce_barplot.png)
-
-**UCE by algorithm and observation model (mean ± std):**
-
-|           | Conic FOV | Nadir camera | Pointwise sensor |
-|-----------|:---------:|:------------:|:----------------:|
-| **EDL**       | **0.0018 ± 0.0031** | **0.0016 ± 0.0025** | **0.0013 ± 0.0022** |
-| **Ensemble**  | 0.0026 ± 0.0016 | 0.0040 ± 0.0016 | 0.0040 ± 0.0017 |
-| **MC Dropout**| 0.0084 ± 0.0026 | 0.0063 ± 0.0018 | 0.0110 ± 0.0029 |
-| **GP**        | 0.0110 ± 0.0158 | 0.0241 ± 0.2443 | 0.0096 ± 0.0093 |
-
-### Epistemic vs. Aleatoric Decomposition
-
-Stacked bars show the mean epistemic and aleatoric contribution to total predictive uncertainty per method. **EDL balances both** (48% epistemic), while MC Dropout is dominated by aleatoric uncertainty (71%).
-
-![Uncertainty decomposition](Results/plots/uncertainty_stacked_bars.png)
-
-### Inference Time
-
-**EDL is the fastest method** (~7 ms), while GP is the slowest due to per-sample fitting (up to 2247 ms for Conic FOV).
-
-| Algorithm | Conic FOV | Nadir camera | Pointwise sensor |
-|-----------|:---------:|:------------:|:----------------:|
-| **EDL**       | 7.1 ± 1.5 ms | 7.2 ± 1.4 ms | 7.4 ± 1.3 ms |
-| **Ensemble**  | 20.3 ± 2.5 ms | 20.6 ± 0.5 ms | 20.9 ± 0.6 ms |
-| **MC Dropout**| 202.4 ± 12.4 ms | 202.0 ± 2.7 ms | 207.1 ± 8.3 ms |
-| **GP**        | 2247.1 ± 0.0 ms | 531.8 ± 0.0 ms | 81.2 ± 0.0 ms |
-
-### Qualitative Comparison — POINTWISE Dataset
-
-Side-by-side prediction maps for a representative test sample: ground truth, predicted mean, epistemic uncertainty, and aleatoric uncertainty for each method.
-
-![Sample prediction maps](Results/plots/sample_maps_Pointwise_sensor.png)
-
-### Summary
-
-**Key takeaways**:
-- **EDL** dominates on reconstruction quality (RMSE), uncertainty calibration (UCE, calibration curves), and inference speed, making it the best overall method.
-- **Ensemble** achieves the best NLL calibration but is ~3× slower than EDL at inference.
-- **GP** offers principled probabilistic construction but scales poorly: it has the worst RMSE and is orders of magnitude slower than deep learning methods.
-- **MC Dropout** produces the most uncertain and least accurate predictions — instability stems from dropout remaining active at inference, creating noisy aleatoric estimates.
+- How well a planner works depends on the calibration of the uncertainty map it is given. MCTS + EDL reaches the lowest RMSE of the study, while MCTS + Ensemble reaches the highest.
+- RH Orienteering is the most robust to poor calibration: integrating reward along edges biases it towards coverage.
+- With an accurate model (EDL), even the uncertainty-agnostic Value-Greedy planner stays competitive.
 
 ---
 
@@ -269,71 +206,116 @@ Side-by-side prediction maps for a representative test sample: ground truth, pre
 
 ```
 .
-├── DatasetGeneration.py         # Physics-based oil spill dataset generator
-├── ground_truths.py             # Particle-based spill simulator
-├── ObservationModels.py         # Pointwise / Nadir / Conic sensor models
-├── models.py                    # Shared U-Net backbone
-├── MC_dropout_model.py          # Monte Carlo Dropout model
-├── MC_ensemble_model.py         # Deep Ensemble model
-├── EDL_model.py                 # Evidential Deep Learning (NIG) model
-├── gaussian_process_model.py    # Gaussian Process baseline
-├── train_models.py              # Training pipeline for all DL models
-├── evaluate_models.py           # Evaluation pipeline (inference + metrics)
-├── metrics.py                   # RMSE, R², NLL, ECE, UCE implementations
-├── evaluation_store.py          # Results serialisation (DataFrame ↔ pkl.gz)
-├── plot_results.py              # Generate all result figures
-├── dataset_analysis.py          # Exploratory dataset plots
-├── utils.py                     # Shared visualisation helpers
-├── Datasets/
-│   ├── dataset_CONIC.npz        # 2000 samples, Conic FOV sensor
-│   ├── dataset_NADIR.npz        # 2000 samples, Nadir camera
-│   ├── dataset_POINTWISE.npz    # 2000 samples, Pointwise sensor
-│   ├── dataset_config_*.yaml    # Simulation parameters per dataset
-│   └── plots/                   # 11 exploratory figures × 3 datasets
-├── Weights/
-│   └── {dataset}_{model}.pt     # Trained model weights
-└── Results/
-    ├── eval_{dataset}.pkl.gz    # Evaluation DataFrames (400 samples × metrics)
-    └── plots/                   # Result figures (boxplots, calibration, maps)
+├── dataset/
+│   ├── DatasetGeneration.py          # Builds the .npz datasets from a YAML config
+│   ├── ground_truths.py              # Particle-based oil spill simulator
+│   ├── ObservationModels.py          # Pointwise / Nadir / Conic sensor + path generator
+│   ├── dataset_analysis.py           # Exploratory dataset figures
+│   └── dataset_config_*.yaml         # Simulation + sensor parameters per dataset
+├── scenario/
+│   ├── scenario.py                   # ObservationScenario: multi-agent movement + noisy sensing
+│   ├── extended_scenario.py          # Adds distance budget, model inference, RMSE/IoU
+│   ├── scenario_config.yaml          # Dataset path, start positions, noise, budget
+│   ├── run_experiments.py            # Benchmark: every (model × policy × map) episode
+│   ├── multiagent_max_informative_path_waypoints.py  # Multi-agent IPP problem for MCTS
+│   ├── max_informative_path*.py      # Single-agent IPP problems
+│   ├── grid_world.py                 # Toy problem for the planning algorithms
+│   ├── generate_mask_dataset.py      # Policy-driven observation-mask dataset generator
+│   ├── test_policy.py                # Quick visual test of a single policy
+│   ├── models/
+│   │   ├── unet_model.py             # Shared U-Net backbone
+│   │   ├── MC_dropout_model.py       # Monte Carlo Dropout
+│   │   ├── MC_ensemble_model.py      # Deep Ensemble
+│   │   ├── EDL_model.py              # Evidential Deep Learning (NIG)
+│   │   ├── gaussian_process_model.py # GP baseline
+│   │   ├── myopic_model.py           # IDW interpolation (not in the paper)
+│   │   ├── train_models.py           # Offline training of the deep models
+│   │   ├── evaluate_models.py        # Offline (static-dataset) evaluation
+│   │   ├── metrics.py                # RMSE, R², NLL, ECE, UCE
+│   │   ├── evaluation_store.py       # Results (de)serialisation
+│   │   └── plot_results.py           # Offline-evaluation figures
+│   ├── policies/
+│   │   ├── base.py                   # Policy interface
+│   │   ├── myopic_greedy.py          # Value-Greedy
+│   │   ├── uncertainty_greedy.py     # Uncertainty-Greedy
+│   │   ├── epsilon_greedy.py         # ε-Greedy
+│   │   ├── orienteering_policy.py    # Receding-horizon Orienteering
+│   │   ├── mamcts_policy.py          # Multi-agent MCTS (paper)
+│   │   ├── mcts_policy.py            # Single-agent MCTS
+│   │   └── algorithms/               # MCTS, MAMCTS, forward search, B&B, sparse sampling
+│   └── results/plot_results.py       # Figures/report from CSV experiment logs
+├── viewer.ipynb                      # Paper analysis: UCE, calibration curves, box plots, timing, figures
+├── train_ensemble.py                 # Stand-alone ensemble trainer (random-mask augmentation)
+├── experiments/                      # sylegendarium logs (*.meta.yaml + *.metrics.tar via Git LFS)
+├── Results/                          # Paper figures (PDF)
+├── Weights/                          # Trained weights: dataset_{POINTWISE,NADIR,CONIC}_{EDL,Ensemble,MC_Dropout}.pt
+└── onlineplanning/                   # Notes on the classic online-planning algorithms (Kochenderfer)
 ```
 
 ---
 
-## Requirements
+## Installation
 
-```
-torch
-numpy
-scikit-learn
-scipy
-matplotlib
-seaborn
-pyyaml
-tqdm
-```
-
-Install with:
+Python ≥ 3.10 with:
 
 ```bash
-pip install -r requirements.txt
+pip install torch numpy scipy scikit-learn matplotlib seaborn pandas pyyaml tqdm sylegendarium
 ```
 
-To regenerate datasets from scratch:
+A CUDA GPU is optional but recommended for training. The experiment logs in `experiments/` are stored with Git LFS (`git lfs pull`).
+
+---
+
+## Usage
+
+Run every command from the repository root.
+
+### 1. Generate the datasets
 
 ```bash
-python DatasetGeneration.py
+python dataset/DatasetGeneration.py --dataset dataset/dataset_config_POINTWISE.yaml
 ```
 
-To retrain all models:
+The output folder is set by `output_dir` in the YAML. Move the resulting `.npz` into `dataset/`, which is where the training and scenario scripts look for it. Run `python dataset/dataset_analysis.py` for exploratory plots.
+
+### 2. Train the deep models
 
 ```bash
-python train_models.py
+python scenario/models/train_models.py --datasets dataset/dataset_POINTWISE.npz
 ```
 
-To reproduce all results and figures:
+This trains MC Dropout, the Ensemble and EDL for 50 epochs with batch size 16 and Adam, and writes `Weights/{dataset}_{model}.pt`. The default learning rate is 3·10⁻⁴; EDL is capped at 5·10⁻⁴ and uses λ = 10⁻³ with gradient clipping at 1.0. Override with `--epochs`, `--batch-size` and `--lr`. The GP has no weights.
+
+Optional offline evaluation on the static dataset (RMSE, NLL, ECE, UCE):
 
 ```bash
-python evaluate_models.py
-python plot_results.py
-python dataset_analysis.py
+python scenario/models/evaluate_models.py
 ```
+
+### 3. Run the closed-loop benchmark
+
+```bash
+python scenario/run_experiments.py --models edl,ensemble,mcdropout,gaussian_process --policies mcts --n-maps 10
+```
+
+| Flag | Meaning |
+|---|---|
+| `--models` | Any of `edl`, `ensemble`, `mcdropout`, `gaussian_process` |
+| `--policies` | Keys enabled in `POLICY_CATALOGUE` in [run_experiments.py](scenario/run_experiments.py). Only `mcts` is active by default; uncomment the other entries to run `myopic_greedy`, `uncertainty_greedy`, `epsilon_greedy` and `orienteering`. |
+| `--n-maps`, `--map-start` | Which ground-truth maps to evaluate |
+| `--budget` | Overrides the config budget (px) |
+| `--dataset` | Alternative `.npz` of ground-truth maps |
+| `--weights` | Weights folder (default `Weights/`). The `dataset_POINTWISE_*.pt` files are loaded. |
+| `--render` | Live six-panel visualisation |
+
+Each run writes a timestamped log to `experiments/`.
+
+### 4. Analyse the results
+
+Open [viewer.ipynb](viewer.ipynb). It loads every log in `experiments/` with `sylegendarium.load_experiments`. From those logs it produces the UCE table, the calibration curves, the RMSE and IoU box plots, the timing tables, the trajectory plots and the framework figure, saving them under `Results/plots/`.
+
+---
+
+## Acknowledgments
+
+Project PID2024-158365OB-C21 funded by MICIU/AEI/10.13039/501100011033 and by FEDER, UE, and Universidad de Sevilla, VII Plan Propio de Investigación y Transferencia (2022–2025).
