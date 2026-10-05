@@ -1,0 +1,174 @@
+Maps:
+  category: parameter
+  order: 21
+  parquet_safe: true
+  type: json
+Models:
+  category: parameter
+  order: 20
+  parquet_safe: true
+  type: json
+Policies:
+  category: parameter
+  order: 19
+  parquet_safe: true
+  type: json
+action:
+  category: metric
+  deep copy: false
+  description: action taken by vehicles
+  np_order: 7
+  order: 16
+  parquet_safe: false
+  type: <class 'numpy.ndarray'>
+  unit: node
+budget:
+  category: metric
+  deep copy: false
+  description: Remaining budget
+  order: 2
+  parquet_safe: true
+  type: <class 'float'>
+  unit: units
+dataset_name:
+  category: metric
+  deep copy: false
+  description: Dataset name
+  order: 12
+  parquet_safe: true
+  type: <class 'str'>
+  unit: dataset
+distance:
+  category: metric
+  deep copy: false
+  description: Distance traveled by each agent
+  np_order: 0
+  order: 1
+  parquet_safe: false
+  type: <class 'numpy.ndarray'>
+  unit: meters
+ground_truth:
+  category: metric
+  deep copy: false
+  description: Ground truth map
+  np_order: 5
+  order: 8
+  parquet_safe: false
+  type: <class 'numpy.ndarray'>
+  unit: ground_truth
+iou:
+  category: metric
+  deep copy: false
+  description: Intersection over Union
+  order: 3
+  parquet_safe: true
+  type: <class 'float'>
+  unit: proportion
+map_idx:
+  category: metric
+  deep copy: false
+  description: Map index
+  order: 11
+  parquet_safe: true
+  type: <class 'int'>
+  unit: map_index
+model_mean_time:
+  category: metric
+  deep copy: false
+  description: Mean time per step
+  order: 14
+  parquet_safe: true
+  type: <class 'float'>
+  unit: seconds
+model_name:
+  category: metric
+  deep copy: false
+  description: Model name
+  order: 13
+  parquet_safe: true
+  type: <class 'str'>
+  unit: model
+mse:
+  category: metric
+  deep copy: false
+  description: Mean squared error of nodes
+  order: 0
+  parquet_safe: true
+  type: <class 'float'>
+  unit: nodes
+obs_map:
+  category: metric
+  deep copy: false
+  description: Observation map
+  np_order: 1
+  order: 4
+  parquet_safe: false
+  type: <class 'numpy.ndarray'>
+  unit: observations
+obs_mask:
+  category: metric
+  deep copy: false
+  description: Observation mask
+  np_order: 2
+  order: 5
+  parquet_safe: false
+  type: <class 'numpy.ndarray'>
+  unit: mask
+policy_mean_time:
+  category: metric
+  deep copy: false
+  description: Mean time per step
+  order: 15
+  parquet_safe: true
+  type: <class 'float'>
+  unit: seconds
+policy_name:
+  category: metric
+  deep copy: false
+  description: Policy name
+  order: 10
+  parquet_safe: true
+  type: <class 'str'>
+  unit: policy
+position:
+  category: metric
+  deep copy: false
+  description: Current agent positions
+  np_order: 6
+  order: 9
+  parquet_safe: false
+  type: <class 'numpy.ndarray'>
+  unit: positions
+predicted_mean:
+  category: metric
+  deep copy: false
+  description: Predicted mean map
+  np_order: 3
+  order: 6
+  parquet_safe: false
+  type: <class 'numpy.ndarray'>
+  unit: predictions
+predicted_uncertainty:
+  category: metric
+  deep copy: false
+  description: Predicted uncertainty map
+  np_order: 4
+  order: 7
+  parquet_safe: false
+  type: <class 'numpy.ndarray'>
+  unit: uncertainty
+run:
+  category: index
+  description: uncertainty multiasv from 12/09/2026
+  order: 0
+  parquet_safe: true
+  type: category
+  unit: ''
+step:
+  category: index
+  description: uncertainty multiasv from 12/09/2026
+  order: 1
+  parquet_safe: true
+  type: category
+  unit: ''
+version: 1.0.0
